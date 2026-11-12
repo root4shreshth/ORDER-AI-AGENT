@@ -77,6 +77,7 @@ export interface ConversationDetail {
   toolCalls: ToolCall[];
   tickets: Ticket[];
   pendingActions: { id: string; type: string; summary: string; status: string; createdAt: string }[];
+  teamRequests: { id: string; kind: string; status: string; question: string; reply: string | null; createdAt: string }[];
 }
 
 export interface OrderRow {

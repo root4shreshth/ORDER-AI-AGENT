@@ -20,6 +20,7 @@ import { detectEscalation, detectInjection, detectLanguage, detectOtherCustomerP
 import { renderContext } from "./prompts.js";
 import { channelVerifiedPhone } from "./tools/identity.js";
 import { maskPhone } from "../lib/mask.js";
+import { describeQuote, type ApprovedQuote } from "../modules/team/service.js";
 import type { ToolContext } from "./tools/context.js";
 import type { Engine, EngineResult, HistoryMessage } from "./llm/types.js";
 import { ClaudeEngine } from "./llm/claude.js";
@@ -52,6 +53,8 @@ const FALLBACK: Record<Lang, string> = {
 
 const INTENT_BY_TOOL: Record<string, string> = {
   propose_new_order: "new_order",
+  ask_team: "team_request",
+  search_knowledge_base: "general_question",
   list_my_orders: "order_status",
   get_shipment_status: "order_status",
   get_order_details: "order_status",
@@ -193,6 +196,7 @@ export async function handleCustomerMessage(conversationId: string, rawText: str
           const order = (t.input as { order_number?: string } | null)?.order_number;
           return `${t.toolName}${order ? `(${order})` : ""}→${(t.output as { code?: string } | null)?.code ?? (t.ok ? "ok" : "error")}`;
         }),
+      teamRequests: await teamRequestLines(conversationId),
       flags,
     });
     const history = await loadHistory(conversationId, customerMessage.id);
@@ -299,6 +303,99 @@ async function setFirstResponse(conv: Conversation, customerAt: Date) {
   const firstCustomer = await prisma.message.findFirst({ where: { conversationId: conv.id, role: "CUSTOMER" }, orderBy: { createdAt: "asc" } });
   const from = firstCustomer?.createdAt ?? customerAt;
   await prisma.conversation.updateMany({ where: { id: conv.id, firstResponseMs: null }, data: { firstResponseMs: Date.now() - from.getTime() } });
+}
+
+/** Open / answered team requests for the per-turn context (incl. approved quote ids). */
+async function teamRequestLines(conversationId: string): Promise<string[]> {
+  const reqs = await prisma.teamRequest.findMany({ where: { conversationId }, orderBy: { createdAt: "desc" }, take: 3 });
+  return reqs.map((r) => {
+    if (r.status === "PENDING") return `request ${r.id} PENDING — waiting for the team ("${r.question.slice(0, 160)}")`;
+    const quote = r.quote && !r.quoteUsedAt ? ` · approved quote_id=${r.id}: ${describeQuote(r.quote as unknown as ApprovedQuote)}` : r.quoteUsedAt ? " · quote already used for an order" : "";
+    return `request ${r.id} ${r.status} — team said: "${(r.reply ?? "").slice(0, 300)}"${quote}`;
+  });
+}
+
+/**
+ * The team answered a request (Team page). The assistant relays it to the customer in their
+ * language — same agent, same tools (it may go on to propose a quoted order). Exactly once.
+ */
+export async function handleTeamUpdate(teamRequestId: string): Promise<"relayed" | "skipped" | "human_owns_chat"> {
+  const tr = await prisma.teamRequest.findUnique({ where: { id: teamRequestId } });
+  if (!tr || tr.status === "PENDING" || !tr.reply) return "skipped";
+  const done = await prisma.auditLog.findFirst({ where: { entityType: "conversation", entityId: tr.conversationId, action: "TEAM_REPLY_RELAYED", meta: { path: ["teamRequestId"], equals: tr.id } } });
+  if (done) return "skipped";
+  const release = await waitForLock(`conv:${tr.conversationId}`);
+  const started = Date.now();
+  try {
+    const conv = await prisma.conversation.findUniqueOrThrow({ where: { id: tr.conversationId } });
+    const quote = tr.quote ? (tr.quote as unknown as ApprovedQuote) : null;
+    // Internal note for staff (never sent to the customer).
+    const note = await addMessage(prisma, {
+      conversationId: conv.id,
+      role: "SYSTEM",
+      content: `Team (${tr.answeredBy ?? "team"}) → assistant: ${tr.reply}${quote ? ` · Approved quote: ${describeQuote(quote)}` : ""}`,
+      engine: "system",
+      meta: { internal: true, teamRequestId: tr.id },
+    });
+    await emitMessage(note);
+    await audit(prisma, { actor: "system", entityType: "conversation", entityId: conv.id, action: "TEAM_REPLY_RELAYED", meta: { teamRequestId: tr.id, delivered: conv.status === "AI_HANDLING" } });
+    if (conv.status !== "AI_HANDLING") return "human_owns_chat";
+
+    const language = (conv.language as Lang | null) ?? "en";
+    const settings = await getSettings();
+    const engine = getEngine();
+    const turnId = randomUUID();
+    const ctx: ToolContext = { conversationId: conv.id, turnId, conversation: conv, customerText: "", language, trace: [], systemFailures: 0 };
+    const now = new Date();
+    const update =
+      `<team_update>The team answered your earlier request (${tr.id}): "${tr.reply}".` +
+      (quote ? ` Approved quote (quote_id=${tr.id}): ${describeQuote(quote)}.` : "") +
+      ` Relay this to the customer now in their language; if a quote was approved, offer to book it.</team_update>`;
+    const contextBlock =
+      renderContext({
+        today: isoDateIST(now),
+        weekday: now.toLocaleDateString("en-IN", { weekday: "long", timeZone: "Asia/Kolkata" }),
+        language: language === "hi" ? "Hindi (Devanagari)" : language === "hinglish" ? "Hinglish (Roman script)" : "English",
+        verifiedOrders: conv.verifiedOrderNumbers,
+        channelVerifiedPhone: await channelVerifiedPhone(conv).then((p) => (p ? maskPhone(p) : null)),
+        teamRequests: await teamRequestLines(conv.id),
+      }) + `\n\n${update}`;
+    const history = await loadHistory(conv.id, "");
+
+    let text: string;
+    let result: EngineResult | null = null;
+    if (engine.name === "claude") {
+      result = await engine.run(ctx, history, contextBlock, settings.agent.maxToolIterations);
+      text = result.failure || !result.text.trim() ? "" : result.text;
+    } else text = "";
+    // Deterministic fallback (MOCK mode or LLM failure): relay the team's words verbatim.
+    if (!text) text = `Update from our team: ${tr.reply}${quote ? `\nApproved quote: ${describeQuote(quote)}. Shall I book it for you?` : ""}`;
+
+    const reply = await prisma.$transaction(async (tx) => {
+      const fresh = await tx.conversation.findUniqueOrThrow({ where: { id: conv.id } });
+      if (fresh.status !== "AI_HANDLING") return null;
+      return addMessage(tx, {
+        conversationId: conv.id,
+        role: "AI",
+        content: text,
+        engine: result && !result.failure ? "claude" : "template",
+        language,
+        intent: "team_update",
+        meta: { teamRequestId: tr.id },
+        inputTokens: result?.usage.inputTokens,
+        outputTokens: result?.usage.outputTokens,
+        cacheReadTokens: result?.usage.cacheReadTokens,
+        costUsd: result?.costUsd,
+        latencyMs: Date.now() - started,
+      });
+    });
+    if (!reply) return "human_owns_chat";
+    await prisma.toolCall.updateMany({ where: { turnId }, data: { messageId: reply.id } });
+    await emitMessage(reply);
+    return "relayed";
+  } finally {
+    await release();
+  }
 }
 
 export const currentModel = (): string => (llmEngine() === "claude" ? env.ANTHROPIC_MODEL : "mock");

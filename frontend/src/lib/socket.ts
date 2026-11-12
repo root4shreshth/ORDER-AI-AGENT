@@ -26,11 +26,13 @@ export function useAdminLiveUpdates(): void {
       void qc.invalidateQueries({ queryKey: ["order", e.orderNumber] });
     };
     const onTicket = () => void qc.invalidateQueries({ queryKey: ["conversations"] });
+    const onTeam = () => void qc.invalidateQueries({ queryKey: ["team-requests"] });
     s.on("message:new", onConv);
     s.on("conversation:updated", onConv);
     s.on("order:updated", onOrder);
     s.on("order:new", onOrder);
     s.on("ticket:new", onTicket);
+    s.on("team:request", onTeam);
     return () => {
       s.off("connect", join);
       s.off("message:new", onConv);
@@ -38,6 +40,7 @@ export function useAdminLiveUpdates(): void {
       s.off("order:updated", onOrder);
       s.off("order:new", onOrder);
       s.off("ticket:new", onTicket);
+      s.off("team:request", onTeam);
     };
   }, [qc]);
 }

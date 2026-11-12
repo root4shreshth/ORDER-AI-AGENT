@@ -7,6 +7,7 @@ import { processCourierEvent, sendNdrOutreach, checkNdrNoResponse } from "../mod
 import { holdCodOrder, sendCodConfirmation, sendCodReminder } from "../modules/cod/service.js";
 import { dispatchCourierWebhook, type CourierWebhookPayload } from "../courier/mockCourier.js";
 import { notifyTeamNewOrder, sendOrderWelcome } from "../modules/orders/notifications.js";
+import { handleTeamUpdate } from "../agent/orchestrator.js";
 
 async function markWebhook(id: string, status: "PROCESSED" | "FAILED", error?: string) {
   await prisma.webhookEvent.update({ where: { id }, data: { status, processedAt: new Date(), error } });
@@ -63,6 +64,8 @@ export async function processJob(data: JobData): Promise<unknown> {
       return sendOrderWelcome(data.orderId);
     case "team-new-order":
       return notifyTeamNewOrder(data.orderId);
+    case "team-reply-relay":
+      return handleTeamUpdate(data.teamRequestId);
     default:
       logger.warn({ data }, "unknown job");
       return "unknown";

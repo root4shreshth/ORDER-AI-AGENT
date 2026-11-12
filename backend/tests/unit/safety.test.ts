@@ -29,7 +29,10 @@ describe("escalation triggers", () => {
     expect(detectEscalation("worst service ever, total fraud", rules)?.reason).toBe("ANGRY_CUSTOMER");
     expect(detectEscalation("WHERE IS MY ORDER I PAID ALREADY", rules)?.reason).toBe("ANGRY_CUSTOMER");
   });
-  it("bulk orders", () => expect(detectEscalation("I want a bulk order of 200 pieces", rules)?.reason).toBe("BULK_ORDER"));
+  it("bulk orders: no handover by default (the assistant asks the team instead); optional rule still works", () => {
+    expect(detectEscalation("I want a bulk order of 200 pieces", rules)).toBeNull();
+    expect(detectEscalation("I want a bulk order of 200 pieces", { ...rules, onBulkOrder: true })?.reason).toBe("BULK_ORDER");
+  });
   it("ordinary messages do not trigger", () => {
     expect(detectEscalation("Where is my order WL10234?", rules)).toBeNull();
     expect(detectEscalation("which size for 5'8, 70kg?", rules)).toBeNull();

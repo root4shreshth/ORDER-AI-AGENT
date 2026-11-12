@@ -1,0 +1,130 @@
+{
+  "engine": {
+    "engine": "claude",
+    "model": "claude-haiku-5-5",
+    "queue": {
+      "waiting": 0,
+      "delayed": 7,
+      "active": 0,
+      "failed": 0,
+      "completed": 287,
+      "paused": 0
+    }
+  },
+  "results": [
+    {
+      "id": "S01",
+      "appendixB": 1,
+      "category": "Support & verification",
+      "title": "Order status, correct phone",
+      "wanted": "Know where WL10234 is",
+      "expectedOutcome": "Verified; courier status, ETA and tracking link from tools",
+      "pass": true,
+      "failures": [],
+      "toolsCalled": [
+        "verify_customer→VERIFIED",
+        "get_shipment_status"
+      ],
+      "finalStatus": "AI_HANDLING",
+      "lastReply": "Your order WL10234 has been verified and is on its way. It's currently in transit at the regional hub, with WishShip Express (AWB WS7100002), and the expected delivery date is 14 Nov 2026.\n\nYou can track it here: http://localhost:5173/track/WS7100002",
+      "ungrounded": [],
+      "turnLatencies": [
+        2043,
+        3026
+      ],
+      "costUsd": 0.0025257,
+      "tokens": {
+        "input": 12,
+        "output": 261
+      },
+      "understood": true,
+      "correctTools": true,
+      "correctDecision": true
+    },
+    {
+      "id": "S02",
+      "appendixB": 2,
+      "category": "Support & verification",
+      "title": "Order status, wrong phone",
+      "wanted": "Know where WL10234 is (with someone else's number)",
+      "expectedOutcome": "Shares nothing, asks to verify again",
+      "pass": true,
+      "failures": [],
+      "toolsCalled": [
+        "verify_customer→VERIFICATION_FAILED"
+      ],
+      "finalStatus": "AI_HANDLING",
+      "lastReply": "I'm sorry, but the order number and phone number you gave don't match our records, so I can't share any order details. Please re-check both: the order number (it starts with WL) and the 10-digit mobile number used when you placed that order. Then send them again and I'll try once more.",
+      "ungrounded": [],
+      "turnLatencies": [
+        2987
+      ],
+      "costUsd": 0.0012883,
+      "tokens": {
+        "input": 6,
+        "output": 195
+      },
+      "understood": true,
+      "correctTools": true,
+      "correctDecision": true
+    },
+    {
+      "id": "S10",
+      "category": "Support & verification",
+      "title": "Order status, phone given first then order number",
+      "wanted": "Status, details split across messages",
+      "expectedOutcome": "Collects both, verifies, shares status",
+      "pass": true,
+      "failures": [],
+      "toolsCalled": [
+        "verify_customer→VERIFIED",
+        "get_shipment_status"
+      ],
+      "finalStatus": "AI_HANDLING",
+      "lastReply": "Thanks, your order WL10234 is verified. It has shipped with WishShip Express and is currently in transit at the regional hub. The expected delivery date is 14 Nov 2026.\n\nYou can track it here: http://localhost:5173/track/WS7100002",
+      "ungrounded": [],
+      "turnLatencies": [
+        1450,
+        3819
+      ],
+      "costUsd": 0.0026043999999999998,
+      "tokens": {
+        "input": 12,
+        "output": 378
+      },
+      "understood": true,
+      "correctTools": true,
+      "correctDecision": true
+    },
+    {
+      "id": "R02",
+      "appendixB": 4,
+      "category": "Returns & exchanges",
+      "title": "Return innerwear",
+      "wanted": "Return the briefs",
+      "expectedOutcome": "Rejected — innerwear can't be returned, explained politely",
+      "pass": true,
+      "failures": [],
+      "toolsCalled": [
+        "verify_customer→VERIFIED",
+        "get_order_details",
+        "check_return_eligibility→INNERWEAR_NOT_RETURNABLE"
+      ],
+      "finalStatus": "AI_HANDLING",
+      "lastReply": "Thanks, your order WL10236 is verified. Unfortunately, the cotton briefs pack of 3 (size M) can't be returned, because innerwear is not returnable under our hygiene policy.\n\nIf the briefs are the wrong size, I can check a size exchange for you instead, or I can check the oversized graphic tee in the same order for a return. Just let me know what you'd like to do.",
+      "ungrounded": [],
+      "turnLatencies": [
+        1382,
+        4329
+      ],
+      "costUsd": 0.0027331,
+      "tokens": {
+        "input": 14,
+        "output": 412
+      },
+      "understood": true,
+      "correctTools": true,
+      "correctDecision": true
+    }
+  ]
+}

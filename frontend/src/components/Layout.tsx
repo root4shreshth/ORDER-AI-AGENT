@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
-import { BarChart3, MessageSquare, Package, ScrollText, Settings, ExternalLink, Bot, ShoppingBag } from "lucide-react";
+import { BarChart3, MessageSquare, Package, ScrollText, Settings, ExternalLink, Bot, ShoppingBag, Users } from "lucide-react";
 import { api } from "../lib/api";
 import { getSocket, useAdminLiveUpdates } from "../lib/socket";
 import { Badge } from "./ui";
@@ -16,6 +16,7 @@ interface SystemInfo {
 const NAV = [
   { to: "/inbox", label: "Inbox", icon: MessageSquare },
   { to: "/orders", label: "Orders", icon: Package },
+  { to: "/team", label: "Team", icon: Users },
   { to: "/analytics", label: "Analytics", icon: BarChart3 },
   { to: "/audit", label: "Audit log", icon: ScrollText },
   { to: "/settings", label: "Settings", icon: Settings },
@@ -57,6 +58,7 @@ export function Layout() {
   useAdminLiveUpdates();
   const sys = useQuery({ queryKey: ["system"], queryFn: () => api.get<SystemInfo>("/api/system"), refetchInterval: 15_000 });
   const needs = useQuery({ queryKey: ["conversations", "NEEDS_HUMAN"], queryFn: () => api.get<unknown[]>("/api/conversations?status=NEEDS_HUMAN") });
+  const teamPending = useQuery({ queryKey: ["team-requests", "PENDING"], queryFn: () => api.get<unknown[]>("/api/team-requests?status=PENDING") });
 
   return (
     <div className="flex h-full">
@@ -81,6 +83,7 @@ export function Layout() {
               <Icon className="size-4 shrink-0" />
               <span className="hidden flex-1 lg:inline">{label}</span>
               {to === "/inbox" && (needs.data?.length ?? 0) > 0 && <span className="hidden rounded-full bg-rose-500 px-1.5 text-[11px] font-semibold text-white lg:inline">{needs.data!.length}</span>}
+              {to === "/team" && (teamPending.data?.length ?? 0) > 0 && <span className="hidden rounded-full bg-amber-500 px-1.5 text-[11px] font-semibold text-white lg:inline">{teamPending.data!.length}</span>}
             </NavLink>
           ))}
           <a href="/chat" target="_blank" rel="noreferrer" className="mt-2 flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50" title="Open customer chat">

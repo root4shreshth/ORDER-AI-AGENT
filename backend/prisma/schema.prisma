@@ -104,6 +104,12 @@ enum TicketStatus {
   CLOSED
 }
 
+enum TeamRequestStatus {
+  PENDING // waiting for a team member
+  ANSWERED // team replied; the assistant relayed it to the customer
+  CLOSED
+}
+
 enum WebhookStatus {
   RECEIVED
   PROCESSED
@@ -132,6 +138,8 @@ model Product {
   returnClass ReturnClass
   notes       String
   sizeChart   Json? // { size: { chest?, waist?, length?, fits? } }
+  /// rich product content for the assistant: description, fabric, fit, care, colours, highlights
+  details     Json?
   variants    ProductVariant[]
   orderItems  OrderItem[]
 }
@@ -317,6 +325,7 @@ model Conversation {
   toolCalls         ToolCall[]
   tickets           SupportTicket[]
   pendingActions    PendingAction[]
+  teamRequests      TeamRequest[]
 
   @@index([status])
   @@index([lastMessageAt])
@@ -429,4 +438,26 @@ model AppSetting {
   key       String   @id
   value     Json
   updatedAt DateTime @updatedAt
+}
+
+/// The assistant asks the team for a decision (bulk quote, special request) while it keeps the chat.
+model TeamRequest {
+  id              String            @id @default(cuid())
+  conversationId  String
+  kind            String // BULK_QUOTE | PRICE_REQUEST | SPECIAL_REQUEST | OTHER
+  question        String // short message drafted by the assistant for the team
+  customerSummary String
+  status          TeamRequestStatus @default(PENDING)
+  reply           String?
+  answeredBy      String?
+  answeredAt      DateTime?
+  /// team-approved quote: { items:[{sku,size,quantity,unitPrice}], validUntil, notes }
+  quote           Json?
+  quoteUsedAt     DateTime?
+  orderId         String?
+  createdAt       DateTime          @default(now())
+  conversation    Conversation      @relation(fields: [conversationId], references: [id])
+
+  @@index([status, createdAt])
+  @@index([conversationId])
 }

@@ -12,7 +12,9 @@ export type Step =
   | { wait: number }
   | { createTestOrder: "high_risk_first_time" | "low_risk_repeat" | "medium_risk" | "prepaid" }
   | { courier: { order: string; type: string; reason?: string } }
-  | { useOrderConversation: string | "$created" };
+  | { useOrderConversation: string | "$created" }
+  /** act as the team member: answer this chat's pending team request (optionally approving a quote) */
+  | { teamReply: { reply: string; quote?: { items: { sku: string; size: string; quantity: number; unitPrice: number }[]; validDays?: number } } };
 
 export interface Ctx {
   db: PrismaClient;
@@ -386,8 +388,10 @@ export const SCENARIOS: Scenario[] = [
   },
   {
     id: "H10", category: "Handover & safety", title: "Bulk order enquiry",
-    wanted: "200 kurtas for a corporate event", expectedOutcome: "Handed to a person",
-    steps: [{ say: "I want a bulk order of 200 kurtas for my company" }], expectStatus: "NEEDS_HUMAN",
+    wanted: "200 kurtas for a corporate event", expectedOutcome: "AI keeps the chat, collects the requirement / asks the team; no handover",
+    steps: [{ say: "I want a bulk order of 200 kurtas for my company, all sizes equally, delivery to Lucknow 226001 in 3 weeks. Best price?" }],
+    mustCall: ["ask_team"], expectStatus: "AI_HANDLING",
+    db: async (c) => check((await c.db.teamRequest.count({ where: { conversationId: c.conversationId } })) === 1, "no team request created"),
   },
 
   // ---------------------------------------------------------------- ordering in chat
@@ -415,10 +419,29 @@ export const SCENARIOS: Scenario[] = [
   },
   {
     id: "O03", category: "Ordering", title: "Bulk order in chat",
-    wanted: "15 kurtas", expectedOutcome: "Handed to a person as a bulk order; no order created",
-    steps: [{ say: "I need 15 kurtas in size M for my team" }],
-    expectStatus: "NEEDS_HUMAN",
+    wanted: "15 kurtas", expectedOutcome: "Bulk: no order created; AI keeps the chat and works with the team",
+    steps: [{ say: "I need 15 kurtas in size M for my team, delivery to Pune 411001. What price can you do?" }],
+    expectStatus: "AI_HANDLING",
     db: async (c) => check((await c.db.order.count({ where: { source: { startsWith: "chat" } } })) === 0, "an order was created"),
+  },
+  {
+    id: "O04", category: "Ordering", title: "Bulk quote: ask team → team approves → book in chat",
+    wanted: "200 kurtas at the best price, then book it", expectedOutcome: "Team request drafted; team's quote relayed; order booked at the quoted price after yes",
+    steps: [
+      { say: "I want 200 cotton printed kurtas, 50 each in S, M, L and XL, delivered to Lucknow 226001 within 3 weeks. What's your best price per piece?" },
+      { teamReply: { reply: "We can do ₹1,000 per piece for 200 pieces (50 each S/M/L/XL), dispatch within 12 days of payment.", quote: { items: ["S", "M", "L", "XL"].map((size) => ({ sku: "WL-KUR-01", size, quantity: 50, unitPrice: 1000_00 })), validDays: 7 } } },
+      { wait: 9000 },
+      { say: "Great, book it. Office 4, Civil Lines, Lucknow 226001. Name Rajat Verma, mobile 9000088888. I'll pay online." },
+      { say: "yes" },
+    ],
+    mustCall: ["ask_team", "propose_new_order", "confirm_action"],
+    replyMatches: [/1,000/],
+    db: async (c) => {
+      const o = await c.db.order.findFirst({ where: { customer: { phone: "9000088888" } }, include: { items: true } });
+      const tr = await c.db.teamRequest.findFirst({ where: { conversationId: c.conversationId } });
+      const qty = o?.items.reduce((s, i) => s + i.quantity, 0);
+      return check(!!o && qty === 200 && o.items.every((i) => i.unitPrice === 1000_00) && tr?.orderId === o.id, `order ${o?.orderNumber} qty ${qty}, team request order ${tr?.orderId === o?.id}`);
+    },
   },
 ];
 

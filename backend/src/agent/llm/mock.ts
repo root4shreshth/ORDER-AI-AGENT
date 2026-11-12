@@ -12,7 +12,7 @@ import { executeTool } from "../tools/execute.js";
 import type { ToolContext, ToolResult } from "../tools/context.js";
 import { emptyUsage, type Engine, type EngineResult, type HistoryMessage } from "./types.js";
 
-type Intent = "damage" | "status" | "cancel" | "return" | "exchange" | "address" | "refund" | "size" | "policy" | "pincode" | "cod_confirm" | "cod_pay" | "cod_edit" | "ndr" | "greeting" | "unknown";
+type Intent = "bulk" | "damage" | "status" | "cancel" | "return" | "exchange" | "address" | "refund" | "size" | "policy" | "pincode" | "cod_confirm" | "cod_pay" | "cod_edit" | "ndr" | "greeting" | "unknown";
 
 interface MockState {
   intent?: Intent;
@@ -57,6 +57,7 @@ function detectIntent(text: string): Intent {
   const t = text.toLowerCase();
   if (/pay\s*online|prepaid|upi|card|5%/.test(t)) return "cod_pay";
   if (/edit\s*address|change\s*(the\s*)?address|deliver\s+(it\s+)?to\s+my|office\s+instead|address\s+(badal|change)|pata\s+badal|पता/.test(t)) return "address";
+  if (/bulk|wholesale|quotation|quote|corporate|(d{2,})s*(pieces|pcs|units|kurtas|tees|jeans|bags)/.test(t)) return "bulk";
   if (/damage|damaged|torn|defect|broken|stain|phat(a|i)|kharab|tuta/.test(t)) return "damage";
   if (/refund\s*(kab|status|kidhar|when)|when.*refund|paisa\s*kab|पैसा\s*कब|रिफंड\s*कब/.test(t) || (/refund/.test(t) && /processed|received|credited|done|status|where|kab|mila|aaya/.test(t) && !/return|wapas/.test(t))) return "refund";
   if (/cancel|रद्द|nahi\s*chahiye|don'?t\s+want|dont\s+want|no\s+longer\s+want/.test(t)) return "cancel";
@@ -191,6 +192,16 @@ export class MockEngine implements Engine {
         return done("");
       }
       return done(L(lang, "Sorry, I didn't quite get that. Is it about an order's status, a cancellation, a return/exchange, a refund, or sizing?", "Sorry, samajh nahi aaya. Order status, cancel, return/exchange, refund ya size — kis cheez mein madad chahiye?", "माफ़ कीजिए, समझ नहीं आया। ऑर्डर स्टेटस, कैंसल, रिटर्न/एक्सचेंज या रिफंड — किसमें मदद चाहिए?"));
+    }
+
+    // Bulk / quotation → ask the team, keep the conversation.
+    if (intent === "bulk") {
+      await call("ask_team", {
+        kind: "BULK_QUOTE",
+        question: `Customer is asking for a bulk order / quotation: "${text.slice(0, 300)}". Please share the best price per piece and timeline.`,
+        customer_summary: `${ctx.conversation.channel === "telegram" ? "Telegram" : "Web chat"} customer asking about a bulk order.`,
+      });
+      return done(L(lang, "Thanks! Bulk orders get a special quote from our team — I've sent them your requirement and I'll get back to you right here shortly. Could you also share the delivery city and the size split, if you know it?", "Thanks! Bulk orders ke liye hamari team special quote deti hai — maine aapki requirement team ko bhej di hai, main yahin jaldi update karunga. Delivery city aur size split bhi bata dijiye?"));
     }
 
     // Damage claims: the photo requirement and refund decision need a person (manual review policy).

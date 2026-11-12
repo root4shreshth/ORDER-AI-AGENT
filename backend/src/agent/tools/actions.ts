@@ -19,6 +19,7 @@ import { getSettings } from "../../modules/settings/settings.js";
 import { audit } from "../../modules/audit/audit.js";
 import { isAffirmative } from "../safety.js";
 import { createOrder, quoteOrder, quoteSummary } from "../../modules/orders/ingest.js";
+import { getUsableQuote, type ApprovedQuote } from "../../modules/team/service.js";
 import { channelVerifiedPhone } from "./identity.js";
 import type { ToolContext, ToolResult } from "./context.js";
 
@@ -237,7 +238,10 @@ export const PlaceOrderSchema = z.object({
   items: z
     .array(z.object({ sku: z.string().min(3).max(20).describe("Product code from get_product_info, e.g. WL-KUR-01"), size: z.string().min(1).max(5), quantity: z.number().int().min(1).max(20) }))
     .min(1)
-    .max(10),
+    .max(10)
+    .optional()
+    .describe("Items for a normal order; omit when quote_id is given (the quote fixes items and prices)"),
+  quote_id: z.string().max(40).optional().describe("Team-approved quote id from <context> (bulk orders) — its items and prices are used"),
   payment_method: z.enum(["COD", "PREPAID"]).describe("COD = pay on delivery (₹49 fee); PREPAID = pay online and save 5%"),
   customer_name: z.string().min(2).max(80).optional().describe("Needed for new customers"),
   phone: z.string().max(20).optional().describe("Customer mobile; omit when <context> shows channel_verified_phone"),
@@ -259,12 +263,20 @@ export async function proposeNewOrder(ctx: ToolContext, input: PlaceOrderInput):
   const name = existing?.name ?? input.customer_name;
   if (!name) return missing("the customer's name for the order");
   if (!/\d/.test(input.address_line1)) return missing("the house/flat number in the delivery address");
+  let approved: ApprovedQuote | undefined;
+  if (input.quote_id) {
+    const usable = await getUsableQuote(ctx.conversationId, input.quote_id);
+    if (!usable) return refuse("QUOTE_NOT_AVAILABLE", "That quote isn't available (not approved, expired or already used). Ask the team again with ask_team.");
+    approved = usable.quote;
+  } else if (!input.items?.length) {
+    return missing("the products, sizes and quantities");
+  }
   let quote;
   try {
-    quote = await quoteOrder({ items: input.items, pincode: input.pincode, paymentMethod: input.payment_method, prepaidDiscount: true });
+    quote = await quoteOrder({ items: approved?.items ?? input.items!, pincode: input.pincode, paymentMethod: input.payment_method, prepaidDiscount: !approved, approvedQuote: approved });
   } catch (e) {
     if (e instanceof AppError) {
-      if (e.code === "BULK_ORDER") return refuse("BULK_ORDER", `${e.message} Hand the chat over to a human (reason BULK_ORDER).`, { requires_handover: true });
+      if (e.code === "BULK_ORDER") return refuse("BULK_ORDER", `${e.message} Collect the requirement (product, sizes, quantity, city) and use ask_team (kind BULK_QUOTE) — keep helping the customer meanwhile.`, { needs_team_quote: true });
       return refuse(e.code, e.message);
     }
     throw e;
@@ -288,17 +300,34 @@ export async function proposeNewOrder(ctx: ToolContext, input: PlaceOrderInput):
 }
 
 async function executePlaceOrder(ctx: ToolContext, p: PlaceOrderParams) {
-  const r = await createOrder({
-    customer: { name: p.customer_name, phone: p.phone },
-    items: p.items,
-    pincode: p.pincode,
-    address: { line1: p.address_line1, line2: p.address_line2, landmark: p.landmark },
-    paymentMethod: p.payment_method,
-    prepaidDiscount: true,
-    source: ctx.conversation.channel === "telegram" ? "chat_telegram" : "chat_web",
-    confirmedInChat: true,
-    actor: "ai",
-  });
+  let approved: ApprovedQuote | undefined;
+  if (p.quote_id) {
+    const usable = await getUsableQuote(ctx.conversationId, p.quote_id);
+    if (!usable) throw new AppError(422, "QUOTE_NOT_AVAILABLE", "That quote is no longer available (expired or already used).");
+    approved = usable.quote;
+    // claim the quote first so it can only ever be used once
+    const claimed = await prisma.teamRequest.updateMany({ where: { id: p.quote_id, quoteUsedAt: null }, data: { quoteUsedAt: new Date() } });
+    if (claimed.count !== 1) throw new AppError(409, "QUOTE_ALREADY_USED", "That quote was already used for an order.");
+  }
+  let r;
+  try {
+    r = await createOrder({
+      customer: { name: p.customer_name, phone: p.phone },
+      items: approved?.items ?? p.items ?? [],
+      pincode: p.pincode,
+      address: { line1: p.address_line1, line2: p.address_line2, landmark: p.landmark },
+      paymentMethod: p.payment_method,
+      prepaidDiscount: !approved,
+      approvedQuote: approved,
+      source: ctx.conversation.channel === "telegram" ? "chat_telegram" : "chat_web",
+      confirmedInChat: true,
+      actor: "ai",
+    });
+  } catch (e) {
+    if (p.quote_id) await prisma.teamRequest.update({ where: { id: p.quote_id }, data: { quoteUsedAt: null } }); // release on failure
+    throw e;
+  }
+  if (p.quote_id) await prisma.teamRequest.update({ where: { id: p.quote_id }, data: { orderId: r.orderId, status: "CLOSED" } });
   const order = await prisma.order.findUniqueOrThrow({ where: { id: r.orderId } });
   // The customer just placed this order here → this chat may discuss it.
   ctx.conversation = await prisma.conversation.update({
@@ -313,6 +342,6 @@ async function executePlaceOrder(ctx: ToolContext, p: PlaceOrderParams) {
     total: fmtInr(order.total),
     payment: order.paymentMethod === "COD" ? `pay ${fmtInr(order.total)} on delivery` : "pay online",
     payment_link: r.paymentLink ?? null,
-    delivery_estimate: deliveryEstimate(pin.zone).text,
+    delivery_estimate: approved ? `${deliveryEstimate(pin.zone).text} after dispatch — dispatch timeline as agreed with the team` : deliveryEstimate(pin.zone).text,
   };
 }

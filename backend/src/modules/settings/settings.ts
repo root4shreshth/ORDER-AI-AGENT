@@ -71,7 +71,7 @@ export const DEFAULT_SETTINGS: Settings = {
     onLegalThreat: true,
     onPublicComplaintThreat: true,
     onAnger: true,
-    onBulkOrder: true,
+    onBulkOrder: false, // bulk orders are quoted via ask_team (the assistant keeps the chat)
     refundReviewThresholdInr: 1500,
     maxFailedVerifications: 3,
     maxFailedTurns: 2,

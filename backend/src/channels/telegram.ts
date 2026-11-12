@@ -210,6 +210,7 @@ export async function handleTelegramUpdate(u: TgUpdate, transport: TelegramTrans
 export async function dispatchToTelegram(messageId: string, transport: TelegramTransport): Promise<boolean> {
   const m = await prisma.message.findUnique({ where: { id: messageId }, include: { conversation: true } });
   if (!m || m.role === "CUSTOMER" || m.conversation.channel !== "telegram" || !m.conversation.externalChatId) return false;
+  if ((m.meta as { internal?: boolean } | null)?.internal) return false; // staff-only notes
   const claimed = await redis().set(`tg:out:${m.id}`, "1", "EX", 7 * 86_400, "NX");
   if (claimed !== "OK") return false;
   const meta = (m.meta ?? {}) as { quickReplies?: { id: string; label: string }[]; orderNumber?: string; telegram?: { requestContact?: boolean; removeKeyboard?: boolean } };

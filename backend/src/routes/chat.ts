@@ -21,7 +21,7 @@ async function authConversation(req: Request): Promise<Conversation> {
 }
 
 function publicMessages(messages: { id: string; role: string; content: string; createdAt: Date; engine: string | null; meta: unknown }[]) {
-  return messages.map((m) => {
+  return messages.filter((m) => !(m.meta as { internal?: boolean } | null)?.internal).map((m) => {
     const meta = (m.meta ?? {}) as { quickReplies?: unknown; orderNumber?: string; paymentLink?: string; kind?: string };
     return { id: m.id, role: m.role, content: m.content, createdAt: m.createdAt, engine: m.engine, quickReplies: meta.quickReplies ?? null, orderNumber: meta.orderNumber ?? null, paymentLink: meta.paymentLink ?? null, kind: meta.kind ?? null };
   });

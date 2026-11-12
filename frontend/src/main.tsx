@@ -10,6 +10,7 @@ import { OrderDetailPage } from "./pages/OrderDetailPage";
 import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { AuditPage } from "./pages/AuditPage";
+import { TeamPage } from "./pages/TeamPage";
 import { CustomerChatPage } from "./pages/CustomerChatPage";
 import { PayPage, TrackPage } from "./pages/PublicPages";
 
@@ -30,6 +31,7 @@ createRoot(document.getElementById("root")!).render(
             <Route path="/inbox/:id" element={<InboxPage />} />
             <Route path="/orders" element={<OrdersPage />} />
             <Route path="/orders/:orderNumber" element={<OrderDetailPage />} />
+            <Route path="/team" element={<TeamPage />} />
             <Route path="/analytics" element={<AnalyticsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/audit" element={<AuditPage />} />

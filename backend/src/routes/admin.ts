@@ -17,6 +17,7 @@ import { getSettings, saveSettings, SettingsSchema, DEMO_TIMINGS, DEFAULT_SETTIN
 import { audit } from "../modules/audit/audit.js";
 import { jobsQueue } from "../jobs/queues.js";
 import { nextOrderNumber, quoteOrder } from "../modules/orders/ingest.js";
+import { answerTeamRequest, describeQuote, QuoteSchema, type ApprovedQuote } from "../modules/team/service.js";
 
 const h = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, next: NextFunction) => fn(req, res).catch(next);
 
@@ -81,6 +82,7 @@ export function adminRouter(): Router {
         toolCalls: { orderBy: { createdAt: "asc" } },
         tickets: { orderBy: { createdAt: "desc" } },
         pendingActions: { orderBy: { createdAt: "desc" }, take: 10 },
+        teamRequests: { orderBy: { createdAt: "desc" } },
       },
     });
     if (!c) throw notFound("Conversation");
@@ -180,6 +182,41 @@ export function adminRouter(): Router {
     const payload = await emitCourierEvent(shipment.awb, body.type, body.reason, body.event_id);
     await audit(prisma, { actor: `human:${agentName(req)}`, entityType: "courier", entityId: shipment.awb, action: "TEST_EVENT_TRIGGERED", newValue: { type: body.type, reason: body.reason }, meta: { order: o.orderNumber, eventId: payload.event_id } });
     res.status(202).json({ queued: true, event: payload });
+  }));
+
+  // ---------------------------------------------------------------- team requests (assistant ↔ team)
+  r.get("/team-requests", h(async (req, res) => {
+    const status = z.enum(["PENDING", "ANSWERED", "CLOSED"]).optional().parse(req.query.status || undefined);
+    const rows = await prisma.teamRequest.findMany({
+      where: status ? { status } : {},
+      orderBy: [{ status: "asc" }, { createdAt: "desc" }],
+      take: 100,
+      include: { conversation: { include: { customer: true } } },
+    });
+    const orderIds = rows.map((r) => r.orderId).filter((x): x is string => !!x);
+    const orders = await prisma.order.findMany({ where: { id: { in: orderIds } }, select: { id: true, orderNumber: true } });
+    res.json(
+      rows.map((t) => ({
+        id: t.id,
+        kind: t.kind,
+        status: t.status,
+        question: t.question,
+        customerSummary: t.customerSummary,
+        reply: t.reply,
+        answeredBy: t.answeredBy,
+        answeredAt: t.answeredAt,
+        quote: t.quote ? { ...(t.quote as object), text: describeQuote(t.quote as unknown as ApprovedQuote) } : null,
+        quoteUsed: !!t.quoteUsedAt,
+        orderNumber: orders.find((o) => o.id === t.orderId)?.orderNumber ?? null,
+        createdAt: t.createdAt,
+        conversation: { id: t.conversationId, channel: t.conversation.channel, status: t.conversation.status, customerName: t.conversation.customer?.name ?? "Unverified visitor" },
+      })),
+    );
+  }));
+
+  r.post("/team-requests/:id/reply", h(async (req, res) => {
+    const body = z.object({ reply: z.string().trim().min(2).max(2000), quote: QuoteSchema.optional() }).parse(req.body);
+    res.json(await answerTeamRequest(String(req.params.id), { reply: body.reply, quote: body.quote, agentName: agentName(req) }));
   }));
 
   // ---------------------------------------------------------------- real order entry (dashboard)

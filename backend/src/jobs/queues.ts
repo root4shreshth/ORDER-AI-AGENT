@@ -19,7 +19,8 @@ export type JobData =
   | { name: "ndr-outreach"; shipmentId: string; eventId: string }
   | { name: "ndr-no-response"; shipmentId: string; attempt: number }
   | { name: "order-welcome"; orderId: string }
-  | { name: "team-new-order"; orderId: string };
+  | { name: "team-new-order"; orderId: string }
+  | { name: "team-reply-relay"; teamRequestId: string };
 
 let queue: Queue | undefined;
 export function jobsQueue(): Queue {

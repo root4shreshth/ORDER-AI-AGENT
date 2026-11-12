@@ -13,6 +13,8 @@ import { addDays, fmtDate, fmtInr, normalizeOrderNumber } from "../../lib/format
 import { checkCancellation, checkCodEligibility, deliveryEstimate, POLICY_DOCUMENT, refundMethodPolicy } from "../../policies/index.js";
 import { evaluateExchange, evaluateReturn, getOrderByNumber, getPincode, orderView, verifyOrderPhone } from "../../modules/orders/service.js";
 import { CATALOG } from "../../modules/catalog/data.js";
+import { searchKnowledge } from "../../modules/catalog/knowledge.js";
+import { createTeamRequest, TEAM_REQUEST_KINDS } from "../../modules/team/service.js";
 import { getSettings } from "../../modules/settings/settings.js";
 import { respondToCod } from "../../modules/cod/service.js";
 import { AppError } from "../../lib/errors.js";
@@ -43,7 +45,7 @@ import { channelVerifiedPhone } from "./identity.js";
 /** Authorization gate for every order-specific tool. */
 export function requireVerified(ctx: ToolContext, orderInput: string): { orderNumber: string } | ToolResult {
   const orderNumber = normalizeOrderNumber(orderInput);
-  if (!orderNumber) return { ok: false, code: "INVALID_ORDER_NUMBER", message: "That doesn't look like a valid order number (format WL12345)." };
+  if (!orderNumber) return { ok: false, code: "INVALID_ORDER_NUMBER", message: "That doesn't look like a valid order number (it starts with WL followed by digits)." };
   if (!ctx.conversation.verifiedOrderNumbers.includes(orderNumber)) {
     return {
       ok: false,
@@ -266,6 +268,7 @@ export const TOOLS = [
           return_rule: p.notes,
           sizes: p.variants.map((v) => ({ size: v.size, in_stock: v.stock > 0 })),
           size_chart: p.sizeChart,
+          details: p.details,
         })),
       };
     },
@@ -279,6 +282,42 @@ export const TOOLS = [
       const v = await prisma.productVariant.findFirst({ where: { product: { sku: input.sku.toUpperCase() }, size: input.size.toUpperCase() } });
       if (!v) return { ok: true, code: "SIZE_NOT_OFFERED", message: `Size ${input.size} isn't offered for ${input.sku}.`, data: { in_stock: false } };
       return { ok: true, code: v.stock > 0 ? "IN_STOCK" : "OUT_OF_STOCK", data: { sku: input.sku.toUpperCase(), size: v.size, in_stock: v.stock > 0, low_stock: v.stock > 0 && v.stock <= 3 } };
+    },
+  }),
+
+  define({
+    name: "search_knowledge_base",
+    description: "Search the store knowledge base (brand, support hours, payment methods, shipping, sizing tips, bulk/corporate orders, customisation, fabric care, privacy). Answer general questions only from what it returns.",
+    schema: z.object({ query: z.string().min(2).max(200) }),
+    handler: async (_ctx, input) => {
+      const hits = searchKnowledge(input.query);
+      return hits.length
+        ? { ok: true, data: hits.map((h) => ({ title: h.title, text: h.text })) }
+        : { ok: true, code: "NO_MATCH", message: "Nothing in the knowledge base about that. Offer to check with the team (ask_team) instead of guessing." };
+    },
+  }),
+
+  define({
+    name: "ask_team",
+    description:
+      "Ask the Wishluck team for a decision while YOU keep the conversation: bulk orders (more than 10 pieces) and price quotations, discounts beyond policy, custom printing/gifting, special delivery requests, or a question the knowledge base can't answer. Write a short, specific message for the team (what the customer wants, quantities/sizes, city, any budget) — never include the customer's phone or address. Then tell the customer you've checked with the team and will reply here shortly. Never promise a price or approval yourself.",
+    schema: z.object({
+      kind: z.enum(TEAM_REQUEST_KINDS),
+      question: z
+        .string()
+        .min(10)
+        .max(800)
+        .describe("Short message to the team, e.g. 'Customer wants 250 cotton printed kurtas, sizes S/M/L/XL equally, delivery to Prayagraj. Best price per piece and timeline?'"),
+      customer_summary: z.string().min(5).max(500).describe("1–2 lines of context on the customer and the conversation"),
+    }),
+    handler: async (ctx, input) => {
+      const { request, existing } = await createTeamRequest(ctx.conversationId, { kind: input.kind, question: input.question, customerSummary: input.customer_summary });
+      return {
+        ok: true,
+        code: existing ? "TEAM_REQUEST_UPDATED" : "TEAM_REQUEST_SENT",
+        message: "The team has been asked. Tell the customer you've checked with the team and will get back to them right here shortly. Keep helping with anything else meanwhile.",
+        data: { team_request_id: request.id },
+      };
     },
   }),
 
@@ -364,7 +403,7 @@ export const TOOLS = [
   define({
     name: "handover_to_human",
     description:
-      "Hand the chat to the human support team. Use when: the customer asks for a person, is clearly upset, mentions consumer court/legal action/posting online; a refund or goodwill request is above ₹1,500 or a tool says manual review is required; damage claim without a photo; the same issue failed twice or tools keep failing; you are unsure what the customer wants; bulk orders. After calling it, stop — the customer is told someone will join.",
+      "Hand the chat to the human support team. Use when: the customer asks for a person, is clearly upset, mentions consumer court/legal action/posting online; a refund or goodwill request is above ₹1,500 or a tool says manual review is required; damage claim without a photo; the same issue failed twice or tools keep failing; or you are still unsure what the customer wants after a clarifying question. NOT for bulk orders, quotations or special requests — use ask_team for those and keep helping. After calling it, stop — the customer is told someone will join.",
     schema: z.object({
       reason: z.enum(HANDOVER_REASONS),
       mood: z.enum(["calm", "neutral", "confused", "frustrated", "angry", "anxious"]),

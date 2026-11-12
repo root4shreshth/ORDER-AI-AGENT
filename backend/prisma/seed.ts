@@ -8,6 +8,7 @@
 import { randomBytes } from "node:crypto";
 import { PrismaClient, type CourierStatus, type OrderStatus, type PaymentMethod, type Prisma } from "@prisma/client";
 import { CATALOG, PINCODES } from "../src/modules/catalog/data.js";
+import { PRODUCT_DETAILS } from "../src/modules/catalog/knowledge.js";
 import { DEFAULT_SETTINGS } from "../src/modules/settings/settings.js";
 import { POLICY, shippingFee, ETA_DAYS } from "../src/policies/index.js";
 import { scoreCodRisk } from "../src/risk/codRisk.js";
@@ -154,6 +155,7 @@ async function reset(): Promise<void> {
   // children first
   await prisma.$transaction([
     prisma.toolCall.deleteMany(),
+    prisma.teamRequest.deleteMany(),
     prisma.message.deleteMany(),
     prisma.pendingAction.deleteMany(),
     prisma.supportTicket.deleteMany(),
@@ -214,6 +216,7 @@ export async function seed(): Promise<void> {
         returnClass: p.returnClass,
         notes: p.notes,
         sizeChart: p.sizeChart,
+        details: PRODUCT_DETAILS[p.sku] as unknown as Prisma.InputJsonValue,
         variants: { create: Object.entries(p.stock).map(([size, stock]) => ({ size, stock })) },
       },
     });

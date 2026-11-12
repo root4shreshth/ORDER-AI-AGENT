@@ -50,9 +50,12 @@ export interface QuoteInput {
   paymentMethod: "COD" | "PREPAID";
   /** chat orders that choose prepaid instead of COD get the "switch to prepaid" 5% off */
   prepaidDiscount?: boolean;
+  /** team-approved bulk quote: its unit prices apply, no bulk limit, made to order (no stock check) */
+  approvedQuote?: { items: { sku: string; size: string; quantity: number; unitPrice: number }[] };
 }
 
 export async function quoteOrder(q: QuoteInput) {
+  if (q.approvedQuote) return quoteFromApproved(q);
   const qty = checkOrderQuantity(q.items);
   if (!qty.allowed) throw new AppError(422, qty.code, qty.reason);
   const pin = await getPincode(prisma, q.pincode);
@@ -78,6 +81,27 @@ export async function quoteOrder(q: QuoteInput) {
   }
   return { lines, itemsTotal, shippingFee: ship, codFee, discount, total, pin, eta: deliveryEstimate(pin.zone).text };
 }
+async function quoteFromApproved(q: QuoteInput) {
+  const pin = await getPincode(prisma, q.pincode);
+  if (!pin?.serviceable) throw new AppError(422, "PINCODE_NOT_SERVICEABLE", `We don't deliver to pincode ${q.pincode} yet.`);
+  const items = q.approvedQuote!.items;
+  const products = await prisma.product.findMany({ where: { sku: { in: items.map((i) => i.sku) } }, include: { variants: true } });
+  const lines = items.map((i) => {
+    const p = products.find((x) => x.sku === i.sku);
+    if (!p) throw new AppError(422, "UNKNOWN_SKU", `Unknown product ${i.sku}`);
+    return { sku: p.sku, size: i.size, quantity: i.quantity, product: p, unitPrice: i.unitPrice };
+  });
+  const itemsTotal = lines.reduce((s, l) => s + l.unitPrice * l.quantity, 0);
+  const ship = shippingFee(itemsTotal);
+  const codFee = q.paymentMethod === "COD" ? POLICY.COD_FEE : 0;
+  const total = itemsTotal + ship + codFee;
+  if (q.paymentMethod === "COD") {
+    const d = checkCodEligibility(total, pin);
+    if (!d.allowed) throw new AppError(422, d.code, `${d.reason} Bulk orders above that are paid online.`);
+  }
+  return { lines, itemsTotal, shippingFee: ship, codFee, discount: 0, total, pin, eta: `${deliveryEstimate(pin.zone).text} after dispatch (dispatch timeline as agreed with our team)` };
+}
+
 export type Quote = Awaited<ReturnType<typeof quoteOrder>>;
 
 export function quoteSummary(q: Quote, paymentMethod: "COD" | "PREPAID"): string {
@@ -119,7 +143,8 @@ export async function createOrder(input: CreateOrderInput): Promise<{ orderId: s
 
   const order = await prisma.$transaction(async (tx) => {
     const customer = await tx.customer.upsert({ where: { phone }, create: { name: input.customer.name, phone, email: input.customer.email }, update: {} });
-    for (const l of q.lines) {
+    // Bulk orders on an approved quote are made to order — no shelf-stock reservation.
+    for (const l of input.approvedQuote ? [] : q.lines) {
       const r = await tx.productVariant.updateMany({ where: { productId: l.product.id, size: l.size, stock: { gte: l.quantity } }, data: { stock: { decrement: l.quantity } } });
       if (r.count !== 1) throw new AppError(422, "OUT_OF_STOCK", `${l.product.name} size ${l.size} just went out of stock.`);
     }
@@ -141,7 +166,7 @@ export async function createOrder(input: CreateOrderInput): Promise<{ orderId: s
         city: q.pin.city,
         state: (await tx.pincode.findUniqueOrThrow({ where: { pincode: q.pin.pincode } })).state,
         pincode: q.pin.pincode,
-        notes: [{ at: new Date().toISOString(), by: input.actor, text: `Order placed via ${input.source.replace("_", " ")}${input.eventId ? ` (${input.eventId})` : ""}` }],
+        notes: [{ at: new Date().toISOString(), by: input.actor, text: `Order placed via ${input.source.replace("_", " ")}${input.eventId ? ` (${input.eventId})` : ""}${input.approvedQuote ? " — bulk order on a team-approved quote (made to order)" : ""}` }],
         items: { create: q.lines.map((l) => ({ productId: l.product.id, sku: l.sku, size: l.size, quantity: l.quantity, unitPrice: l.unitPrice })) },
       },
     });

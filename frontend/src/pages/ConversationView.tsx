@@ -275,6 +275,24 @@ export function ConversationView({ id }: { id: string }) {
           ))}
         </div>
 
+        {c.teamRequests?.length > 0 && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-3 text-sm">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="font-semibold">Asked the team</span>
+              <Link to="/team" className="text-xs font-medium text-brand-700 hover:underline">Team page →</Link>
+            </div>
+            <ul className="space-y-2">
+              {c.teamRequests.map((r) => (
+                <li key={r.id} className="text-xs">
+                  <Badge tone={r.status === "PENDING" ? "amber" : "green"}>{r.status === "PENDING" ? "Waiting for team" : humanize(r.status)}</Badge>
+                  <div className="mt-1 text-slate-700">{r.question}</div>
+                  {r.reply && <div className="mt-1 text-emerald-800">Team: {r.reply}</div>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {c.pendingActions.length > 0 && (
           <div className="rounded-xl border border-slate-200 p-3 text-sm">
             <div className="mb-2 font-semibold">Proposed actions</div>

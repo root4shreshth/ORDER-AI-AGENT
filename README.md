@@ -16,7 +16,7 @@ An AI agent for an Indian D2C fashion store that:
 | Backend | Node.js 22 · Express 5 · TypeScript · Prisma 6 / PostgreSQL 16 · BullMQ / Redis 7 · Socket.IO · Zod |
 | AI | Anthropic SDK, manual tool-use loop, default model `claude-haiku-5-5` (configurable) |
 | Frontend | React 19 · Vite · Tailwind CSS v4 · TanStack Query · Recharts |
-| Tests | Vitest + Supertest (135 tests) · 45-conversation evaluation harness |
+| Tests | Vitest + Supertest (143 tests) · 46-conversation evaluation harness |
 | Infra | Docker Compose (Postgres, Redis, API, worker, web) |
 
 ---
@@ -249,7 +249,8 @@ You can inject failures or latency with `POST /mock-courier/config` (`{ "failNex
 
 | Trigger | Where |
 |---|---|
-| Asks for a person, legal / consumer-court threat, threat to post online, clear anger (lexicon, shouting, "!!!"), bulk orders | Deterministic guard, before the LLM |
+| Asks for a person, legal / consumer-court threat, threat to post online, clear anger (lexicon, shouting, "!!!") | Deterministic guard, before the LLM |
+| Bulk orders, quotations, discounts beyond policy, customisation, questions the knowledge base can't answer | **Not a handover:** the assistant keeps the chat and consults the team (`ask_team`, see §11). A "hand bulk orders over" switch is still available in Settings. |
 | Refund/goodwill above ₹1,500, manual-review policy, damage claim without photo, unclear after one clarifying question | Claude via `handover_to_human` (plus the policy tool result) |
 | 3 failed verifications | Tool lockout, then forced handover |
 | Same issue failed twice / tool keeps failing / LLM down twice | Orchestrator failure counter |
@@ -290,10 +291,10 @@ Integration tests cover all of this: the same order and courier webhook replayed
 npm test
 ```
 
-This runs 135 Vitest tests:
+This runs 143 Vitest tests:
 
 - **83 unit tests**: policy, risk, masking, HMAC, safety, language and yes/no detection.
-- **52 integration tests** (incl. Telegram and in-chat ordering): Supertest against an isolated `wishluck_test` database and queue.
+- **60 integration tests** (incl. Telegram, in-chat ordering and the team workflow): Supertest against an isolated `wishluck_test` database and queue.
 
 Before the first run, create the test database:
 
@@ -339,7 +340,7 @@ Each scenario runs through the **real HTTP API** (chat, signed webhooks, courier
 
 An automatic **grounding check** fails any reply that states an order number, AWB, ₹ amount or date that doesn't appear in that conversation's tool outputs (the only exceptions are policy constants such as ₹49 and ₹299).
 
-**Latest run on real Claude (`claude-haiku-5-5`): 45/45 passed (42 support + 3 ordering), 12/12 Appendix B, 4/4 injection and data-leak cases, ~3.2 s per reply, ~$0.0019 per chat.** Earlier runs (39 → 40 → 41 → 41 → 45) and what each fix was are in the report — model output varies, so one perfect run is not a guarantee.
+**Latest run on real Claude (`claude-haiku-5-5`): 45/46 passed (42 support + 4 ordering/team), 12/12 Appendix B, 4/4 injection and data-leak cases, ~3.3 s per reply, ~$0.0021 per chat.** The one failure, earlier runs (39 → 40 → 41 → 41 → 45 → 45) and what each fix was are in the report.
 
 Results go to [`docs/TEST_RESULTS.md`](docs/TEST_RESULTS.md):
 
@@ -378,6 +379,7 @@ Admin endpoints require `x-admin-key` (`ADMIN_API_KEY`).
 |---|---|
 | Docker setup that starts everything with one command | ✅ `docker compose up --build` |
 | Shop assistant in chat (beyond the brief) | ✅ customers order in Telegram / web chat; welcome message + team alert for every new order |
+| Team workflow (beyond the brief) | ✅ assistant asks the team (bulk quotes, special requests) on a Team page, relays the answer, books approved quotes |
 | LLM cost view on the dashboard | ✅ Analytics → "LLM usage & cost", plus cost and latency on every AI reply in the inbox |
 | WhatsApp Cloud API | ➡️ **Telegram instead** (see below) — same agent, second channel |
 | Voice note support | ✅ Web chat 🎤 button (browser speech-to-text, English/Hinglish and Hindi) |
@@ -415,6 +417,23 @@ The agent is also a **shop assistant**: customers can buy in Telegram or the web
   - a live alert in the dashboard (top-right, links to the order);
   - optionally a Telegram team chat. Add the bot to a group, send `/chatid`, and set `TEAM_TELEGRAM_CHAT_ID=<id>` in `backend/.env`.
 - **Real order entry for staff.** Orders → **New order** has a form with an existing customer (✈️ marks Telegram-linked customers) or a new one, items with live stock, address and payment. It goes through the same signed order webhook as the store, so the customer is notified exactly as for a store order. The old presets stay under "Quick test scenarios".
+
+### Working with the team (instead of handing the chat away)
+
+The brief lists bulk orders under "hand over to a person". In practice that leaves the customer waiting, so here **a person still makes the decision, but the assistant keeps the conversation**:
+
+1. The customer asks for something only the team can decide. Examples: "250 kurtas, best price?", a discount, logo printing, a special delivery date.
+2. The assistant collects the essentials (product, quantity per size, city, timeline/budget) and calls `ask_team`. It drafts a short request with no phone or address, then tells the customer it is checking with the team.
+3. The request appears on the dashboard **Team** page (badge in the sidebar, live). If `TEAM_TELEGRAM_CHAT_ID` is set, it also goes to the team's Telegram chat.
+4. A team member replies in plain words and can **approve a quote**: product, quantity per size, ₹ per piece, validity in days.
+5. The assistant **relays the answer to the customer in their language** (a `team-reply-relay` job, exactly once). The team's words are saved as a staff-only note that is never shown to the customer. If a person has taken over the chat, the AI stays silent.
+6. If a quote was approved, the customer can say "book it". The assistant calls `propose_new_order` with `quote_id` and shows the summary; after the yes, the order is created.
+   - Quote prices come from the quote, and the bulk limit is lifted.
+   - Bulk orders are made to order, so no shelf stock is reserved.
+   - The COD limit still applies, so large orders are prepaid.
+   - A quote can be used **once**, only in the chat it was made for, and only until it expires.
+
+**Knowledge base.** Each product has a description, fabric, fit, care, colourway, highlights and size chart. A small store knowledge base (`search_knowledge_base`) covers support hours, payments, shipping, sizing tips, bulk/customisation, fabric care and privacy. This is sample content for the demo store, consistent with Appendix A. When nothing matches, the assistant offers to ask the team instead of guessing.
 
 ### Voice notes
 
