@@ -282,7 +282,7 @@ async function main() {
   writeFileSync("eval/output/results.json", JSON.stringify({ engine: sys, results }, null, 2));
   mkdirSync("../docs", { recursive: true });
   writeFileSync("../docs/TEST_RESULTS.md", md.join("\n"));
-  console.log(`\n${passed}/${results.length} passed · avg ${avgLat} ms/turn · avg cost/chat $${avgCost.toFixed(5)} · written to docs/TEST_RESULTS.md`);
+  console.log(`\n${passed}/${results.length} passed · avg ${avgLat} ms/turn · avg cost/chat $${avgCost.toFixed(5)} · written to ${list.length === SCENARIOS.length ? "docs/TEST_RESULTS.md" : "eval/output/subset-results.md"}`);
   await db.$disconnect();
 }
 

@@ -96,13 +96,17 @@ function findItem(o: OrderWithItems, sku?: string, itemNo?: number) {
 }
 
 // ---------------------------------------------------------------- read-side eligibility (used by tools)
-export async function evaluateReturn(db: Db, o: OrderWithItems, args: { sku?: string; item_no?: number; unused_with_tags: boolean; refund_amount_override?: number }, now = new Date()) {
+/**
+ * unused_with_tags may be unknown: the hard rules (innerwear, sale, window, manual review) are
+ * evaluated first, and only if the item condition is the deciding factor do we ask for it.
+ */
+export async function evaluateReturn(db: Db, o: OrderWithItems, args: { sku?: string; item_no?: number; unused_with_tags?: boolean }, now = new Date()) {
   const item = findItem(o, args.sku, args.item_no);
   if (!item) return { decision: { allowed: false, code: "ITEM_NOT_FOUND", reason: "I couldn't match that item on this order. Which item would you like to return?" } as Decision, item: null };
   const open = await db.returnRequest.count({ where: { orderItemId: item.id, status: { in: ["REQUESTED", "APPROVED", "PICKUP_SCHEDULED", "MANUAL_REVIEW"] } } });
   const decision = checkReturn(
     { returnClass: item.product.returnClass, deliveredAt: o.deliveredAt, returned: item.returned, exchangeCount: item.exchangeCount, hasOpenRequest: open > 0 },
-    { now, unusedWithTags: args.unused_with_tags },
+    { now, unusedWithTags: args.unused_with_tags ?? true },
   );
   if (!decision.allowed) return { decision, item };
   const settings = await getSettings();
@@ -114,6 +118,17 @@ export async function evaluateReturn(db: Db, o: OrderWithItems, args: { sku?: st
   });
   if (review.requiresManualReview) return { decision: { ...review, data: { ...review.data, refundAmount: fmtInr(refundAmount) } }, item };
   const refund = refundMethodPolicy(o.paymentMethod);
+  if (args.unused_with_tags === undefined) {
+    return {
+      decision: {
+        allowed: false,
+        code: "NEEDS_ITEM_CONDITION",
+        reason: "Eligible on date and product type. Ask the customer whether the item is unused with its original tags, then check again.",
+        data: { refund_amount: fmtInr(refundAmount), refund_methods: refund.methods, refund_policy: refund.text },
+      } as Decision,
+      item,
+    };
+  }
   return {
     decision: { ...decision, data: { ...decision.data, refund_amount: fmtInr(refundAmount), refund_methods: refund.methods, refund_policy: refund.text } },
     item,

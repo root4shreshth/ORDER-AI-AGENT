@@ -12,3 +12,4 @@ backend/eval/output/*.tmp
 # Source brief documents (kept out of the repo)
 *.pdf
 *.docx
+eval/output/subset-*

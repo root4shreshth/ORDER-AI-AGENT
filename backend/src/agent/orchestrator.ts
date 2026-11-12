@@ -177,6 +177,12 @@ export async function handleCustomerMessage(conversationId: string, rawText: str
       verifiedOrders: conv.verifiedOrderNumbers,
       activeFlow: await describeFlow(conv),
       pendingAction: pending ? { id: pending.id, summary: pending.summary } : null,
+      earlierTools: (await prisma.toolCall.findMany({ where: { conversationId }, orderBy: { createdAt: "desc" }, take: 10 }))
+        .reverse()
+        .map((t) => {
+          const order = (t.input as { order_number?: string } | null)?.order_number;
+          return `${t.toolName}${order ? `(${order})` : ""}→${(t.output as { code?: string } | null)?.code ?? (t.ok ? "ok" : "error")}`;
+        }),
       flags,
     });
     const history = await loadHistory(conversationId, customerMessage.id);

@@ -9,7 +9,7 @@ import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "../../lib/prisma.js";
 import { env } from "../../config/env.js";
-import { fmtDate, fmtInr, normalizeOrderNumber } from "../../lib/format.js";
+import { addDays, fmtDate, fmtInr, normalizeOrderNumber } from "../../lib/format.js";
 import { checkCancellation, checkCodEligibility, deliveryEstimate, POLICY_DOCUMENT, refundMethodPolicy } from "../../policies/index.js";
 import { evaluateExchange, evaluateReturn, getOrderByNumber, getPincode, orderView, verifyOrderPhone } from "../../modules/orders/service.js";
 import { CATALOG } from "../../modules/catalog/data.js";
@@ -30,7 +30,12 @@ interface ToolDef<S extends z.ZodType> {
 
 const define = <S extends z.ZodType>(t: ToolDef<S>) => t;
 
-const OrderNo = z.string().min(3).max(20).describe("Order number, e.g. WL10234");
+const PROPOSE_NEXT = " If the customer asked for this change, call propose_action NOW in this same turn and show the customer its summary — do not ask \"shall I?\" first.";
+
+/** Last day of the 7-day return/exchange window, so the agent never computes dates itself. */
+const windowEnds = (deliveredAt: Date | null) => (deliveredAt ? fmtDate(addDays(deliveredAt, 7)) : null);
+
+const OrderNo = z.string().min(3).max(20).describe("Order number in the form WL followed by digits");
 
 /** Authorization gate for every order-specific tool. */
 export function requireVerified(ctx: ToolContext, orderInput: string): { orderNumber: string } | ToolResult {
@@ -168,18 +173,18 @@ export const TOOLS = [
   define({
     name: "check_return_eligibility",
     description:
-      "Run the store's return policy for an item of a VERIFIED order. Ask the customer whether the item is unused with tags before calling. The result is final — never override it.",
+      "Run the store's return policy for an item of a VERIFIED order. Call it as soon as you know which item — omit unused_with_tags if the customer hasn't said. If it returns NEEDS_ITEM_CONDITION, ask whether the item is unused with tags. The result is final — never override it.",
     schema: z.object({
       order_number: OrderNo,
       sku: z.string().max(20).optional().describe("SKU of the item, e.g. WL-KUR-01"),
       item_no: z.number().int().min(1).max(20).optional().describe("1-based item position from get_order_details"),
-      unused_with_tags: z.boolean().describe("Customer confirmed the item is unused and has its tags"),
+      unused_with_tags: z.boolean().optional().describe("true/false only if the customer said so; omit if unknown"),
     }),
     handler: async (ctx, input) => {
       const o = await loadVerifiedOrder(ctx, input.order_number);
       if (isResult(o)) return o;
       const { decision, item } = await evaluateReturn(prisma, o, input);
-      return { ok: true, code: decision.code, message: decision.reason, data: { eligible: decision.allowed, requires_manual_review: !!decision.requiresManualReview, item: item ? `${item.product.name} (${item.size})` : null, ...((decision.data as object) ?? {}) } };
+      return { ok: true, code: decision.code, message: decision.allowed ? decision.reason + PROPOSE_NEXT : decision.reason, data: { eligible: decision.allowed, delivered_on: fmtDate(o.deliveredAt), return_window_ends: windowEnds(o.deliveredAt), requires_manual_review: !!decision.requiresManualReview, item: item ? `${item.product.name} (${item.size})` : null, ...((decision.data as object) ?? {}) } };
     },
   }),
 
@@ -196,7 +201,7 @@ export const TOOLS = [
       const o = await loadVerifiedOrder(ctx, input.order_number);
       if (isResult(o)) return o;
       const { decision, item } = await evaluateExchange(prisma, o, input);
-      return { ok: true, code: decision.code, message: decision.reason, data: { eligible: decision.allowed, item: item ? `${item.product.name} (${item.size})` : null, ...((decision.data as object) ?? {}) } };
+      return { ok: true, code: decision.code, message: decision.allowed ? decision.reason + PROPOSE_NEXT : decision.reason, data: { eligible: decision.allowed, delivered_on: fmtDate(o.deliveredAt), exchange_window_ends: windowEnds(o.deliveredAt), item: item ? `${item.product.name} (${item.size})` : null, ...((decision.data as object) ?? {}) } };
     },
   }),
 
@@ -208,7 +213,7 @@ export const TOOLS = [
       const o = await loadVerifiedOrder(ctx, input.order_number);
       if (isResult(o)) return o;
       const d = checkCancellation(o);
-      return { ok: true, code: d.code, message: d.reason, data: { cancellable: d.allowed, order_status: o.status, ...((d.data as object) ?? {}) } };
+      return { ok: true, code: d.code, message: d.allowed ? d.reason + PROPOSE_NEXT : d.reason, data: { cancellable: d.allowed, order_status: o.status, ...((d.data as object) ?? {}) } };
     },
   }),
 
