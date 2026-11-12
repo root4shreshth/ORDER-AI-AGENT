@@ -1,0 +1,17 @@
+{
+  "name": "wishluck-order-ai-agent",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": ["backend", "frontend"],
+  "scripts": {
+    "dev:backend": "npm run dev -w backend",
+    "dev:worker": "npm run worker:dev -w backend",
+    "dev:frontend": "npm run dev -w frontend",
+    "db:migrate": "npm run db:migrate -w backend",
+    "seed": "npm run seed -w backend",
+    "test": "npm run test -w backend",
+    "eval": "npm run eval -w backend",
+    "build": "npm run build -w backend && npm run build -w frontend",
+    "typecheck": "npm run typecheck -w backend && npm run typecheck -w frontend"
+  }
+}

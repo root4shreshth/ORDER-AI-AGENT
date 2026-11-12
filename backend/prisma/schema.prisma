@@ -1,0 +1,424 @@
+// Wishluck Order Ops & Customer Support Agent — data model
+// Money is stored in integer paise. All timestamps are UTC.
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ReturnClass {
+  RETURNABLE // return or exchange
+  RETURN_ONLY // can be returned (no size exchange — e.g. tote bag)
+  INNERWEAR // no returns
+  SALE // size exchange only
+}
+
+enum Zone {
+  METRO
+  REST
+  NE_JK
+}
+
+enum PaymentMethod {
+  COD
+  PREPAID
+}
+
+enum OrderStatus {
+  PENDING_CONFIRMATION // COD awaiting customer confirmation
+  ON_HOLD // COD not confirmed in time
+  CONFIRMED // ready to ship
+  SHIPPED // handed to courier (picked up / in transit / out for delivery)
+  DELIVERED
+  CANCELLED
+  RTO_INITIATED
+  RTO_DELIVERED
+}
+
+enum CourierStatus {
+  CREATED
+  PICKED_UP
+  IN_TRANSIT
+  OUT_FOR_DELIVERY
+  DELIVERY_FAILED
+  DELIVERED
+  RTO_INITIATED
+}
+
+enum CodStatus {
+  AWAITING
+  CONFIRMED
+  CANCELLED
+  CONVERTED_PREPAID
+  ADDRESS_EDIT_REQUESTED
+  ON_HOLD
+}
+
+enum RefundStatus {
+  PENDING_QC
+  APPROVED
+  PROCESSING
+  COMPLETED
+  REJECTED
+}
+
+enum RequestStatus {
+  REQUESTED
+  APPROVED
+  PICKUP_SCHEDULED
+  COMPLETED
+  REJECTED
+  MANUAL_REVIEW
+}
+
+enum ConversationStatus {
+  AI_HANDLING
+  NEEDS_HUMAN
+  HUMAN_HANDLING
+  RESOLVED
+}
+
+enum MessageRole {
+  CUSTOMER
+  AI
+  HUMAN
+  SYSTEM
+}
+
+enum PendingActionStatus {
+  PENDING
+  EXECUTED
+  CANCELLED
+  EXPIRED
+  FAILED
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  CLOSED
+}
+
+enum WebhookStatus {
+  RECEIVED
+  PROCESSED
+  FAILED
+}
+
+model Customer {
+  id            String         @id @default(cuid())
+  name          String
+  phone         String         @unique // normalized 10-digit Indian mobile
+  email         String?
+  createdAt     DateTime       @default(now())
+  orders        Order[]
+  conversations Conversation[]
+}
+
+model Product {
+  id          String           @id @default(cuid())
+  sku         String           @unique
+  name        String
+  priceInr    Int // paise
+  category    String
+  returnClass ReturnClass
+  notes       String
+  sizeChart   Json? // { size: { chest?, waist?, length?, fits? } }
+  variants    ProductVariant[]
+  orderItems  OrderItem[]
+}
+
+model ProductVariant {
+  id        String  @id @default(cuid())
+  productId String
+  size      String
+  stock     Int
+  product   Product @relation(fields: [productId], references: [id])
+
+  @@unique([productId, size])
+}
+
+model Pincode {
+  pincode      String  @id
+  city         String
+  state        String
+  zone         Zone
+  serviceable  Boolean @default(true)
+  codAvailable Boolean @default(true)
+}
+
+model Order {
+  id              String          @id @default(cuid())
+  orderNumber     String          @unique
+  customerId      String
+  paymentMethod   PaymentMethod
+  status          OrderStatus
+  itemsTotal      Int // paise
+  shippingFee     Int
+  codFee          Int             @default(0)
+  discount        Int             @default(0)
+  total           Int
+  addressLine1    String
+  addressLine2    String?
+  landmark        String?
+  city            String
+  state           String
+  pincode         String
+  placedAt        DateTime        @default(now())
+  shippedAt       DateTime?
+  deliveredAt     DateTime?
+  cancelledAt     DateTime?
+  cancelReason    String?
+  rtoReason       String?
+  notes           Json            @default("[]") // [{ at, by, text }]
+  version         Int             @default(0)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  customer        Customer        @relation(fields: [customerId], references: [id])
+  items           OrderItem[]
+  shipment        Shipment?
+  refunds         Refund[]
+  returnRequests  ReturnRequest[]
+  codConfirmation CodConfirmation?
+  pendingActions  PendingAction[]
+
+  @@index([customerId])
+  @@index([status])
+}
+
+model OrderItem {
+  id            String          @id @default(cuid())
+  orderId       String
+  productId     String
+  sku           String
+  size          String
+  quantity      Int
+  unitPrice     Int // paise
+  exchangeCount Int             @default(0)
+  returned      Boolean         @default(false)
+  order         Order           @relation(fields: [orderId], references: [id])
+  product       Product         @relation(fields: [productId], references: [id])
+  returns       ReturnRequest[]
+}
+
+model Shipment {
+  id                 String          @id @default(cuid())
+  orderId            String          @unique
+  awb                String          @unique
+  courier            String          @default("WishShip Express (mock)")
+  status             CourierStatus
+  attemptCount       Int             @default(0)
+  lastFailureReason  String?
+  expectedDeliveryAt DateTime?
+  rescheduledFor     DateTime?
+  alternatePhone     String?
+  deliveryNote       String?
+  ndrOpen            Boolean         @default(false)
+  ndrRespondedAt     DateTime?
+  updatedAt          DateTime        @updatedAt
+  order              Order           @relation(fields: [orderId], references: [id])
+  events             ShipmentEvent[]
+}
+
+model ShipmentEvent {
+  id              String        @id @default(cuid())
+  shipmentId      String
+  externalEventId String        @unique
+  type            CourierStatus
+  reason          String?
+  location        String?
+  occurredAt      DateTime
+  shipment        Shipment      @relation(fields: [shipmentId], references: [id])
+
+  @@index([shipmentId])
+}
+
+model Refund {
+  id            String       @id @default(cuid())
+  orderId       String
+  amount        Int // paise
+  method        String // ORIGINAL_PAYMENT | BANK_TRANSFER | STORE_CREDIT
+  status        RefundStatus
+  qcPassedAt    DateTime?
+  expectedBy    DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime     @default(now())
+  order         Order        @relation(fields: [orderId], references: [id])
+}
+
+model ReturnRequest {
+  id           String        @id @default(cuid())
+  orderId      String
+  orderItemId  String
+  type         String // RETURN | EXCHANGE
+  reason       String
+  newSize      String?
+  status       RequestStatus
+  createdAt    DateTime      @default(now())
+  order        Order         @relation(fields: [orderId], references: [id])
+  orderItem    OrderItem     @relation(fields: [orderItemId], references: [id])
+
+  @@index([orderId])
+}
+
+model CodConfirmation {
+  id             String    @id @default(cuid())
+  orderId        String    @unique
+  riskScore      Int
+  riskBand       String
+  reasons        Json // [{ signal, points, explanation }]
+  status         CodStatus @default(AWAITING)
+  conversationId String?
+  sentAt         DateTime?
+  reminderSentAt DateTime?
+  heldAt         DateTime?
+  respondedAt    DateTime?
+  response       String?
+  paymentLink    String?
+  version        Int       @default(0)
+  createdAt      DateTime  @default(now())
+  order          Order     @relation(fields: [orderId], references: [id])
+}
+
+model Conversation {
+  id                String             @id @default(cuid())
+  token             String             @unique // customer-side access token
+  customerId        String?
+  channel           String             @default("web")
+  status            ConversationStatus @default(AI_HANDLING)
+  language          String?
+  verifiedOrderNumbers String[]        @default([])
+  verifiedAt        DateTime?
+  failedVerifyCount Int                @default(0)
+  failedTurnCount   Int                @default(0) // consecutive unresolved/tool-failed turns
+  context           Json               @default("{}") // { orderNumber?, flow?: 'COD'|'NDR' }
+  handoverReason    String?
+  assignedTo        String?
+  lastIntent        String?
+  firstResponseMs   Int?
+  version           Int                @default(0)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  lastMessageAt     DateTime           @default(now())
+  customer          Customer?          @relation(fields: [customerId], references: [id])
+  messages          Message[]
+  toolCalls         ToolCall[]
+  tickets           SupportTicket[]
+  pendingActions    PendingAction[]
+
+  @@index([status])
+  @@index([lastMessageAt])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  role           MessageRole
+  content        String
+  language       String?
+  engine         String? // claude | mock | template | human
+  intent         String?
+  meta           Json? // quick replies, flags
+  inputTokens    Int?
+  outputTokens   Int?
+  cacheReadTokens Int?
+  costUsd        Float?
+  latencyMs      Int?
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+
+  @@index([conversationId, createdAt])
+}
+
+model ToolCall {
+  id             String       @id @default(cuid())
+  conversationId String
+  messageId      String? // the AI reply this call fed into
+  turnId         String
+  toolName       String
+  input          Json
+  output         Json
+  ok             Boolean
+  errorCode      String?
+  durationMs     Int
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+
+  @@index([conversationId, createdAt])
+}
+
+model PendingAction {
+  id             String              @id @default(cuid())
+  conversationId String
+  orderId        String
+  type           String
+  params         Json
+  summary        String
+  status         PendingActionStatus @default(PENDING)
+  turnId         String // turn that proposed it — cannot be confirmed in the same turn
+  expiresAt      DateTime
+  result         Json?
+  createdAt      DateTime            @default(now())
+  conversation   Conversation        @relation(fields: [conversationId], references: [id])
+  order          Order               @relation(fields: [orderId], references: [id])
+
+  @@index([conversationId, status])
+}
+
+model SupportTicket {
+  id             String       @id @default(cuid())
+  conversationId String
+  orderNumber    String?
+  reason         String
+  mood           String
+  summary        String
+  suggestedReply String
+  orderContext   Json?
+  toolsCalled    Json?
+  status         TicketStatus @default(OPEN)
+  createdAt      DateTime     @default(now())
+  closedAt       DateTime?
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+
+  @@index([status])
+}
+
+model WebhookEvent {
+  id          String        @id @default(cuid())
+  source      String // orders | courier
+  eventId     String
+  eventType   String
+  payload     Json
+  status      WebhookStatus @default(RECEIVED)
+  error       String?
+  receivedAt  DateTime      @default(now())
+  processedAt DateTime?
+
+  @@unique([source, eventId])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actor      String // ai | system | human:<name> | customer | courier
+  entityType String
+  entityId   String
+  action     String
+  oldValue   Json?
+  newValue   Json?
+  meta       Json?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}

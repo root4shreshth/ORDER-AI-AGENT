@@ -1,0 +1,68 @@
+name: wishluck-order-agent
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: wishluck
+      POSTGRES_PASSWORD: wishluck
+      POSTGRES_DB: wishluck
+    ports: ["5455:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wishluck -d wishluck"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6385:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build: { context: ., dockerfile: backend/Dockerfile }
+    env_file: [{ path: backend/.env, required: false }]
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://wishluck:wishluck@postgres:5432/wishluck
+      REDIS_URL: redis://redis:6379
+      PORT: "4000"
+      PUBLIC_API_URL: http://backend:4000
+      CORS_ORIGIN: http://localhost:8080
+      SEED_ON_START: "true"
+    command: ["sh", "-c", "npx prisma migrate deploy && node dist/prisma/seed.js --if-empty && node dist/src/server.js"]
+    ports: ["4000:4000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  worker:
+    build: { context: ., dockerfile: backend/Dockerfile }
+    env_file: [{ path: backend/.env, required: false }]
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://wishluck:wishluck@postgres:5432/wishluck
+      REDIS_URL: redis://redis:6379
+      PUBLIC_API_URL: http://backend:4000
+    command: ["node", "dist/src/worker.js"]
+    depends_on:
+      backend: { condition: service_healthy }
+
+  frontend:
+    build: { context: ., dockerfile: frontend/Dockerfile }
+    ports: ["8080:80"]
+    depends_on:
+      backend: { condition: service_healthy }
+
+volumes:
+  pgdata:
