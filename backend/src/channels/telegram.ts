@@ -14,6 +14,8 @@
  *
  * Runs inside the worker process (single instance), enabled when TELEGRAM_BOT_TOKEN is set.
  */
+import { timingSafeEqual } from "node:crypto";
+import express, { Router } from "express";
 import type { Conversation, Prisma } from "@prisma/client";
 import { env } from "../config/env.js";
 import { prisma } from "../lib/prisma.js";
@@ -230,9 +232,27 @@ export async function dispatchToTelegram(messageId: string, transport: TelegramT
   }
 }
 
+// ---------------------------------------------------------------- webhook endpoint (production)
+let sharedApi: TelegramApi | undefined;
+const getApi = () => (sharedApi ??= new TelegramApi(env.TELEGRAM_BOT_TOKEN));
+
+/** POST /telegram/webhook — Telegram calls this in webhook mode. Verified by the secret token header. */
+export function telegramWebhookRouter(): Router {
+  const r = Router();
+  r.post("/webhook", express.json({ limit: "1mb" }), (req, res) => {
+    const secret = req.header("x-telegram-bot-api-secret-token") ?? "";
+    const expected = env.TELEGRAM_WEBHOOK_SECRET;
+    const ok = !!expected && secret.length === expected.length && timingSafeEqual(Buffer.from(secret), Buffer.from(expected));
+    if (!env.TELEGRAM_BOT_TOKEN || !ok) return void res.status(401).json({ error: "unauthorized" });
+    res.json({ ok: true }); // ACK fast; Telegram retries on slow/failed responses (update_id dedupe covers it)
+    void handleTelegramUpdate(req.body as TgUpdate, getApi()).catch((err) => logger.error({ err: String(err) }, "telegram webhook update failed"));
+  });
+  return r;
+}
+
 // ---------------------------------------------------------------- runner
 export function startTelegram(): () => Promise<void> {
-  const api = new TelegramApi(env.TELEGRAM_BOT_TOKEN);
+  const api = getApi();
   let running = true;
 
   const unsubscribe = subscribe((e) => {
@@ -245,6 +265,18 @@ export function startTelegram(): () => Promise<void> {
   void (async () => {
     try {
       const me = await api.call<{ username: string }>("getMe");
+      if (env.TELEGRAM_MODE === "webhook") {
+        // Production: Telegram POSTs updates to /telegram/webhook (also wakes a sleeping free instance).
+        if (!env.TELEGRAM_WEBHOOK_SECRET) throw new Error("TELEGRAM_WEBHOOK_SECRET is required in webhook mode");
+        await api.call("setWebhook", {
+          url: `${env.PUBLIC_API_URL}/telegram/webhook`,
+          secret_token: env.TELEGRAM_WEBHOOK_SECRET,
+          allowed_updates: ["message", "callback_query"],
+        });
+        logger.info(`Telegram channel active (webhook): @${me.username}`);
+        running = false; // no polling loop
+        return;
+      }
       await api.call("deleteWebhook", { drop_pending_updates: false });
       logger.info(`Telegram channel active: @${me.username}`);
     } catch (err) {

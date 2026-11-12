@@ -14,3 +14,7 @@ backend/eval/output/*.tmp
 *.docx
 eval/output/subset-*
 *.tsbuildinfo
+
+# Deployment secrets (e.g. backend/.env.deploy)
+.env.*
+!.env.example

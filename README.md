@@ -67,6 +67,35 @@ npm run dev:frontend
 
 The dashboard runs at http://localhost:5173 and the customer chat at http://localhost:5173/chat.
 
+### Option C — free hosted deployment (Netlify + Render + Supabase + Redis Cloud)
+
+Netlify only serves static sites and short serverless functions, but this backend needs long-running processes: Socket.IO, the BullMQ worker and the Telegram bot. So the frontend goes on Netlify and the backend on Render.
+
+| Part | Service (free tier) | Config |
+|---|---|---|
+| Dashboard + customer chat | Netlify | `netlify.toml` |
+| API **+ worker + Telegram in one process** (`RUN_WORKER=true`) | Render free web service (Docker) | `render.yaml` |
+| PostgreSQL | Supabase | `DATABASE_URL` = the "Session pooler" connection string |
+| Redis | Redis Cloud free database (30 MB) | `REDIS_URL`. Upstash's free request quota is too small for BullMQ's polling. |
+| Telegram | Webhook mode (`TELEGRAM_MODE=webhook`) | Telegram calls `/telegram/webhook`, verified by `TELEGRAM_WEBHOOK_SECRET`. |
+
+**Steps:**
+1. **Supabase.** Create a project. Copy *Connect → Session pooler* into `backend/.env.deploy` as `SUPABASE_DB_URL=...` (that file is git-ignored). Then copy the local data, schema and migration history with:
+   ```bash
+   bash scripts/copy-db-to-supabase.sh
+   ```
+   The script refuses to overwrite a database that already has the tables.
+2. **Redis Cloud.** Create a free database and copy its `redis://default:…@host:port` URL.
+3. **Render.** New → Blueprint, then pick this repo. Fill in the `sync:false` variables: `DATABASE_URL` (the Supabase URL), `REDIS_URL`, `ANTHROPIC_API_KEY`, `ADMIN_API_KEY`, `TELEGRAM_BOT_TOKEN`, `PUBLIC_API_URL` (the service's own `https://….onrender.com`), and `WEB_URL` / `CORS_ORIGIN` (the Netlify URL).
+4. **Netlify.** Add a new site from this repo; `netlify.toml` handles the build. Set `VITE_API_URL` (the Render URL) and `VITE_ADMIN_KEY` (same value as `ADMIN_API_KEY`), then deploy.
+5. **Keep it awake (optional).** Render's free tier sleeps after 15 minutes idle. A free uptime monitor (e.g. cron-job.org) can call `https://….onrender.com/health` every 10 minutes. Without it, the first request after idle takes about a minute, and COD reminders/holds fire late.
+6. **Stop the local worker** once Render is live. Only one place may run the Telegram bot; Render switches it to webhook mode.
+
+**Free-tier caveats:**
+- The dashboard has no login (`VITE_ADMIN_KEY` is part of the public bundle), so share the link carefully.
+- Set a monthly spend limit in the Anthropic console, because the public chat uses your API credits.
+- Supabase pauses free projects after a week without activity.
+
 ### Claude credentials and MOCK mode
 
 Set `ANTHROPIC_API_KEY` (and optionally `ANTHROPIC_MODEL`) in `backend/.env`, or in the root `.env` for Docker.

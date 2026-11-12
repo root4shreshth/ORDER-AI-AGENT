@@ -11,7 +11,9 @@ import { processJob } from "../../src/jobs/processor.js";
 import { dispatchToTelegram, handleTelegramUpdate, type TelegramTransport, type TgUpdate } from "../../src/channels/telegram.js";
 import { handleCustomerMessage } from "../../src/agent/orchestrator.js";
 import { executeTool } from "../../src/agent/tools/execute.js";
-import { resetDb, startServer, stopServer } from "./helpers.js";
+import request from "supertest";
+import { env } from "../../src/config/env.js";
+import { app, resetDb, startServer, stopServer } from "./helpers.js";
 
 const sent: { chatId: string; text: string; markup?: unknown }[] = [];
 const fake: TelegramTransport = {
@@ -125,6 +127,23 @@ describe("Telegram channel", () => {
   it("sharing an unknown number creates a linked customer profile", async () => {
     await handleTelegramUpdate(msg({ contact: { phone_number: "+91 9000012345", user_id: CHAT, first_name: "Test" } }), fake);
     expect((await prisma.customer.findUniqueOrThrow({ where: { phone: "9000012345" } })).telegramChatId).toBe(String(CHAT));
+  });
+
+  it("webhook mode: rejects a missing/wrong secret, processes a valid update", async () => {
+    const saved = { token: env.TELEGRAM_BOT_TOKEN, secret: env.TELEGRAM_WEBHOOK_SECRET };
+    env.TELEGRAM_BOT_TOKEN = "123456:test-token";
+    env.TELEGRAM_WEBHOOK_SECRET = "s3cret-webhook-token";
+    try {
+      const upd = { update_id: ++updateId, message: { message_id: 1, chat: { id: 707070 }, from: { id: 707070, first_name: "Web" }, text: "/start" } };
+      await request(app).post("/telegram/webhook").send(upd).expect(401);
+      await request(app).post("/telegram/webhook").set("x-telegram-bot-api-secret-token", "wrong-secret-value!!").send(upd).expect(401);
+      await request(app).post("/telegram/webhook").set("x-telegram-bot-api-secret-token", "s3cret-webhook-token").send(upd).expect(200);
+      await new Promise((r) => setTimeout(r, 800));
+      expect(await prisma.conversation.count({ where: { channel: "telegram", externalChatId: "707070" } })).toBe(1);
+    } finally {
+      env.TELEGRAM_BOT_TOKEN = saved.token;
+      env.TELEGRAM_WEBHOOK_SECRET = saved.secret;
+    }
   });
 
   it("voice notes get an honest 'not supported' reply, no agent call", async () => {

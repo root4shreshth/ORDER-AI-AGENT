@@ -1,0 +1,16 @@
+# Netlify: frontend only (dashboard + customer chat). The backend runs on Render (see render.yaml).
+# Set in Netlify → Site settings → Environment variables:
+#   VITE_API_URL   = https://<your-render-service>.onrender.com
+#   VITE_ADMIN_KEY = same value as ADMIN_API_KEY on Render
+[build]
+  command = "npm ci --workspace frontend --include-workspace-root && npm run build --workspace frontend"
+  publish = "frontend/dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# Single-page app: every route serves index.html
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

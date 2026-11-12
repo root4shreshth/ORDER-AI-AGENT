@@ -23,6 +23,12 @@ const EnvSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().optional().default(""),
   /** Optional Telegram chat (e.g. a team group) that gets a message for every new order. Send /chatid to the bot to find it. */
   TEAM_TELEGRAM_CHAT_ID: z.string().optional().default(""),
+  /** Run the BullMQ worker + Telegram inside the API process (single free web service). */
+  RUN_WORKER: z.enum(["true", "false"]).default("false"),
+  /** Telegram: "polling" (local, no public URL) or "webhook" (production; Telegram calls /telegram/webhook). */
+  TELEGRAM_MODE: z.enum(["polling", "webhook"]).default("polling"),
+  /** Secret Telegram sends back in X-Telegram-Bot-Api-Secret-Token (webhook mode). */
+  TELEGRAM_WEBHOOK_SECRET: z.string().optional().default(""),
   /** Force the mock LLM even when a key is present (used by deterministic tests). */
   LLM_MODE: z.enum(["auto", "mock", "claude"]).default("auto"),
 });

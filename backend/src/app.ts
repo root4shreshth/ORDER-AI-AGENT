@@ -9,6 +9,7 @@ import { webhooksRouter } from "./webhooks/router.js";
 import { adminRouter } from "./routes/admin.js";
 import { chatRouter, publicRouter } from "./routes/chat.js";
 import { mockCourierRouter } from "./courier/mockCourier.js";
+import { telegramWebhookRouter } from "./channels/telegram.js";
 
 export function createApp() {
   const app = express();
@@ -19,6 +20,7 @@ export function createApp() {
 
   // Webhooks need the raw body for HMAC — mounted BEFORE the JSON parser.
   app.use("/webhooks", webhooksRouter());
+  app.use("/telegram", telegramWebhookRouter());
   app.use(express.json({ limit: "100kb" }));
 
   app.get("/health", (_req, res) => res.json({ ok: true }));

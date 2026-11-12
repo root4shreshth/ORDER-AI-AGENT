@@ -5,6 +5,7 @@ import { createApp } from "./app.js";
 import { logger } from "./lib/logger.js";
 import { prisma } from "./lib/prisma.js";
 import { subscribe } from "./lib/events.js";
+import { startBackgroundServices } from "./jobs/runner.js";
 
 const app = createApp();
 const httpServer = createServer(app);
@@ -34,9 +35,13 @@ const unsubscribe = subscribe((e) => {
   }
 });
 
+// Free single-service hosting: run the worker + Telegram in this process.
+const stopBackground = env.RUN_WORKER === "true" ? startBackgroundServices() : null;
+
 httpServer.listen(env.PORT, () => logger.info(`API listening on :${env.PORT} (LLM engine: ${llmEngine()}${llmEngine() === "claude" ? `, model ${env.ANTHROPIC_MODEL}` : " — MOCK MODE, no API key"})`));
 
 async function shutdown() {
+  await stopBackground?.();
   await unsubscribe();
   io.close();
   httpServer.close();
