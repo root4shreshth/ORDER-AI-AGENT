@@ -13,3 +13,4 @@ backend/eval/output/*.tmp
 *.pdf
 *.docx
 eval/output/subset-*
+*.tsbuildinfo
