@@ -30,12 +30,13 @@ export function OrdersPage() {
   const [filter, setFilter] = useState("all");
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
+  const [phone, setPhone] = useState("");
   const qc = useQueryClient();
   const nav = useNavigate();
   const { toast, toastNode } = useToast();
   const orders = useQuery({ queryKey: ["orders", filter, q], queryFn: () => api.get<OrderRow[]>(`/api/orders?filter=${filter}&q=${encodeURIComponent(q)}`) });
   const create = useMutation({
-    mutationFn: (preset: string) => api.post<{ orderNumber: string; webhookStatus: number }>("/api/orders/test", { preset }),
+    mutationFn: (preset: string) => api.post<{ orderNumber: string; webhookStatus: number }>("/api/orders/test", { preset, ...(phone.replace(/D/g, "").length >= 10 ? { phone: phone.replace(/D/g, "").slice(-10) } : {}) }),
     onSuccess: (r) => {
       setOpen(false);
       toast(`Test order ${r.orderNumber} sent through the signed webhook (HTTP ${r.webhookStatus}).`);
@@ -131,6 +132,11 @@ export function OrdersPage() {
 
       <Modal open={open} onClose={() => setOpen(false)} title="Create a test order">
         <p className="mb-3 text-sm text-slate-500">The order is sent as a signed <code>order.created</code> webhook — the same path a store platform would use — then scored and confirmed by the worker.</p>
+        <label className="mb-3 block">
+          <span className="label">Customer phone (optional)</span>
+          <input className="input" inputMode="numeric" placeholder="e.g. your number, if linked to the Telegram bot" value={phone} onChange={(e) => setPhone(e.target.value)} maxLength={14} />
+          <span className="mt-0.5 block text-[11px] text-slate-400">Leave empty for a random new customer. If this number is linked to @Wishluck_bot, the COD confirmation arrives in Telegram.</span>
+        </label>
         <div className="space-y-2">
           {PRESETS.map((p) => (
             <button key={p.key} disabled={create.isPending} onClick={() => create.mutate(p.key)} className="w-full rounded-lg border border-slate-200 p-3 text-left hover:border-brand-500 hover:bg-brand-50 disabled:opacity-50">

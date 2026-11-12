@@ -400,7 +400,7 @@ Admin endpoints require `x-admin-key` (`ADMIN_API_KEY`).
 
 **Demo:**
 1. `/start` the bot, then share a phone number that matches a seeded customer. Your own number won't match the sample data. Alternatively, ask about an order directly (e.g. "WL10234, phone 9876543210").
-2. For a COD confirmation in Telegram: share your number, then create a test order with that phone via `POST /api/orders/test` with `{"preset":"custom","phone":"<your number>"}`.
+2. For a COD confirmation in Telegram: share your number with the bot (a customer profile is created if it is new), then in **Orders → Create test order** enter that number in "Customer phone" and pick a COD preset.
 
 ### Voice notes
 

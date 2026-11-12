@@ -155,11 +155,14 @@ export async function handleTelegramUpdate(u: TgUpdate, transport: TelegramTrans
       return;
     }
     const phone = normalizePhone(msg.contact.phone_number);
-    const customer = phone ? await prisma.customer.findUnique({ where: { phone } }) : null;
-    if (!customer) {
-      await botSays(conv.id, "Thanks! I couldn't find any Wishluck orders for that number. You can still ask me anything here.", { telegram: { removeKeyboard: true } });
+    if (!phone) {
+      await botSays(conv.id, "Sorry, that doesn't look like an Indian mobile number.", { telegram: { removeKeyboard: true } });
       return;
     }
+    // New number → create the customer profile so future orders on this number are delivered here.
+    const customer =
+      (await prisma.customer.findUnique({ where: { phone } })) ??
+      (await prisma.customer.create({ data: { phone, name: [msg.contact.first_name ?? msg.from.first_name ?? "Customer"].join(" ").slice(0, 80) } }));
     await prisma.$transaction([
       prisma.customer.updateMany({ where: { telegramChatId: chatId, id: { not: customer.id } }, data: { telegramChatId: null } }),
       prisma.customer.update({ where: { id: customer.id }, data: { telegramChatId: chatId } }),
