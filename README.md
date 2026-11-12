@@ -80,7 +80,7 @@ Netlify only serves static sites and short serverless functions, but this backen
 | Telegram | Webhook mode (`TELEGRAM_MODE=webhook`) | Telegram calls `/telegram/webhook`, verified by `TELEGRAM_WEBHOOK_SECRET`. |
 
 **Steps:**
-1. **Supabase.** Create a project. Copy *Connect → Session pooler* into `backend/.env.deploy` as `SUPABASE_DB_URL=...` (that file is git-ignored). Then copy the local data, schema and migration history with:
+1. **Supabase.** Create a project. Copy *Connect → Session pooler* and add it as an **extra line** in `backend/.env`: `SUPABASE_DB_URL=...`. Leave `DATABASE_URL` pointing at the local database. Then copy the local data, schema and migration history with:
    ```bash
    bash scripts/copy-db-to-supabase.sh
    ```

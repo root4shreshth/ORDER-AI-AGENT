@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Copy the LOCAL database (docker compose postgres) to Supabase — schema + all data + migration history.
-# 1. Put the Supabase "Session pooler" connection string in backend/.env.deploy (git-ignored):
+# 1. Add ONE extra line to backend/.env (git-ignored) — do NOT change DATABASE_URL there:
 #      SUPABASE_DB_URL=postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
+#    (backend/.env.deploy also works, if you prefer a separate file)
 # 2. Run from the repo root:  bash scripts/copy-db-to-supabase.sh
 # Refuses to run if the target already has our tables (no accidental overwrite).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-URL=$(grep -E '^SUPABASE_DB_URL=' backend/.env.deploy 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '\r')
-[ -n "$URL" ] || { echo "SUPABASE_DB_URL missing in backend/.env.deploy"; exit 1; }
+URL=$(cat backend/.env.deploy backend/.env 2>/dev/null | grep -E '^SUPABASE_DB_URL=' | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '\r' || true)
+[ -n "$URL" ] || { echo "SUPABASE_DB_URL missing — add it as an extra line in backend/.env"; exit 1; }
 PSQL=(docker run --rm -i postgres:16-alpine psql "$URL" -v ON_ERROR_STOP=1 -q)
 
 existing=$("${PSQL[@]}" -tA -c "select count(*) from information_schema.tables where table_schema='public' and table_name in ('Order','Customer','_prisma_migrations')")
