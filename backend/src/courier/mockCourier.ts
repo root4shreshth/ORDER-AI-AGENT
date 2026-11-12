@@ -31,7 +31,7 @@ export interface CourierWebhookPayload {
 }
 
 /** Simulate the courier emitting a status event: signed webhook POSTed asynchronously. */
-export async function emitCourierEvent(awb: string, status: CourierEventType, reason?: string, eventId = randomUUID()): Promise<CourierWebhookPayload> {
+export async function emitCourierEvent(awb: string, status: CourierEventType, reason?: string, eventId: string = randomUUID()): Promise<CourierWebhookPayload> {
   const payload: CourierWebhookPayload = {
     event_id: eventId,
     awb,
