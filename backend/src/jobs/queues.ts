@@ -5,8 +5,9 @@
  */
 import { Queue, type JobsOptions } from "bullmq";
 import { createRedis } from "../lib/redis.js";
+import { env } from "../config/env.js";
 
-export const QUEUE_NAME = "wishluck-jobs";
+export const QUEUE_NAME = env.QUEUE_NAME;
 
 export type JobData =
   | { name: "order-webhook"; webhookEventId: string }

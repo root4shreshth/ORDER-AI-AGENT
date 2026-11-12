@@ -365,9 +365,12 @@ async function main(): Promise<void> {
   console.log(`Seeded ${CUSTOMERS.length} customers, ${ORDERS.length} orders, ${CATALOG.length} products, ${PINCODES.length} pincodes.`);
 }
 
-main()
-  .catch((e) => {
-    console.error(e);
-    process.exitCode = 1;
-  })
-  .finally(() => prisma.$disconnect());
+const invokedDirectly = process.argv[1] ? /seed\.(ts|js)$/.test(process.argv[1]) : false;
+if (invokedDirectly) {
+  main()
+    .catch((e) => {
+      console.error(e);
+      process.exitCode = 1;
+    })
+    .finally(() => prisma.$disconnect());
+}

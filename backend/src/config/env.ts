@@ -5,6 +5,7 @@ const EnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().default("redis://localhost:6385"),
+  QUEUE_NAME: z.string().default("wishluck-jobs"),
   PORT: z.coerce.number().int().default(4000),
   PUBLIC_API_URL: z.string().default("http://localhost:4000"),
   /** Customer-facing web app (chat widget, dummy payment page). */
