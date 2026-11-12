@@ -9,8 +9,7 @@ import { fmtDate } from "../lib/format.js";
 import { llmEngine } from "../config/env.js";
 import { startConversation } from "../modules/conversations/service.js";
 import { handleCustomerMessage } from "../agent/orchestrator.js";
-import { respondFromChat, COD_CHOICES } from "../modules/cod/service.js";
-import { NDR_QUICK_REPLIES } from "../modules/ndr/service.js";
+import { handleQuickReply } from "../modules/conversations/quickReplies.js";
 
 const h = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, next: NextFunction) => fn(req, res).catch(next);
 
@@ -52,8 +51,8 @@ export function chatRouter(): Router {
 
   r.post("/:id/messages", h(async (req, res) => {
     const conv = await authConversation(req);
-    const { text } = z.object({ text: z.string().trim().min(1).max(2000) }).parse(req.body);
-    const turn = await handleCustomerMessage(conv.id, text);
+    const { text, inputMode } = z.object({ text: z.string().trim().min(1).max(2000), inputMode: z.enum(["text", "voice"]).optional() }).parse(req.body);
+    const turn = await handleCustomerMessage(conv.id, text, { inputMode });
     res.json({
       status: turn.status,
       engine: turn.engine,
@@ -64,17 +63,9 @@ export function chatRouter(): Router {
 
   r.post("/:id/quick-reply", h(async (req, res) => {
     const conv = await authConversation(req);
-    const body = z.object({ choice: z.string().max(40), orderNumber: z.string().max(20).optional() }).parse(req.body);
-    if ((COD_CHOICES as readonly string[]).includes(body.choice)) {
-      if (!body.orderNumber) throw new AppError(400, "ORDER_REQUIRED", "orderNumber required");
-      const r2 = await respondFromChat(conv.id, body.orderNumber, body.choice as (typeof COD_CHOICES)[number]);
-      return void res.json({ reply: r2.reply ? publicMessages([r2.reply])[0] : null });
-    }
-    const ndr = NDR_QUICK_REPLIES.find((q) => q.id === body.choice);
-    if (!ndr) throw new AppError(400, "UNKNOWN_CHOICE", "Unknown quick reply");
-    const text = { NDR_RESCHEDULE: "I want the delivery on another day", NDR_ADDRESS: "I want to correct my address / add a landmark", NDR_PHONE: "I want to give another phone number", NDR_CANCEL: "I don't want the order any more" }[ndr.id]!;
-    const turn = await handleCustomerMessage(conv.id, text);
-    res.json({ reply: turn.reply ? publicMessages([turn.reply])[0] : null, status: turn.status });
+    const body = z.object({ choice: z.string().max(40), orderNumber: z.string().max(20).nullish() }).parse(req.body);
+    const r2 = await handleQuickReply(conv.id, body.choice, body.orderNumber);
+    res.json({ reply: r2.reply ? publicMessages([r2.reply])[0] : null, status: r2.status });
   }));
 
   return r;

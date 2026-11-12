@@ -16,7 +16,7 @@ An AI agent for an Indian D2C fashion store that:
 | Backend | Node.js 22 · Express 5 · TypeScript · Prisma 6 / PostgreSQL 16 · BullMQ / Redis 7 · Socket.IO · Zod |
 | AI | Anthropic SDK, manual tool-use loop, default model `claude-haiku-5-5` (configurable) |
 | Frontend | React 19 · Vite · Tailwind CSS v4 · TanStack Query · Recharts |
-| Tests | Vitest + Supertest (115 tests) · 42-conversation evaluation harness |
+| Tests | Vitest + Supertest (123 tests) · 42-conversation evaluation harness |
 | Infra | Docker Compose (Postgres, Redis, API, worker, web) |
 
 ---
@@ -290,10 +290,10 @@ Integration tests cover all of this: the same order and courier webhook replayed
 npm test
 ```
 
-This runs 115 Vitest tests:
+This runs 123 Vitest tests:
 
 - **82 unit tests**: policy, risk, masking, HMAC, safety, language and yes/no detection.
-- **33 integration tests**: Supertest against an isolated `wishluck_test` database and queue.
+- **41 integration tests** (incl. 8 for the Telegram channel): Supertest against an isolated `wishluck_test` database and queue.
 
 Before the first run, create the test database:
 
@@ -372,7 +372,43 @@ Admin endpoints require `x-admin-key` (`ADMIN_API_KEY`).
 
 ---
 
-## 11. Known issues and limitations
+## 11. Bonus features
+
+| Bonus (from the brief) | Status |
+|---|---|
+| Docker setup that starts everything with one command | ✅ `docker compose up --build` |
+| LLM cost view on the dashboard | ✅ Analytics → "LLM usage & cost", plus cost and latency on every AI reply in the inbox |
+| WhatsApp Cloud API | ➡️ **Telegram instead** (see below) — same agent, second channel |
+| Voice note support | ✅ Web chat 🎤 button (browser speech-to-text, English/Hinglish and Hindi) |
+| Shopify dev store | ✗ Not built (optional; Appendix A seed data used as the brief allows) |
+
+### Telegram channel (in place of WhatsApp)
+
+**Why Telegram:** the brief names WhatsApp Cloud API. Telegram was chosen as a substitute because it needs no Meta business verification or approved templates, works with anyone (not 5 registered test numbers), and uses long polling, so it runs on localhost and in Docker with no public URL. The code is channel-agnostic (`backend/src/channels/telegram.ts` is a thin adapter around the same orchestrator), so a WhatsApp adapter would follow the same shape.
+
+**Setup:**
+1. Message [@BotFather](https://t.me/BotFather) → `/newbot` → copy the token.
+2. Put it in `backend/.env` (or the root `.env` for Docker) as `TELEGRAM_BOT_TOKEN=...`. Never commit it.
+3. Restart the worker. Its log prints `Telegram channel active: @yourbot`.
+
+**How it works:**
+- **Same agent.** Messages run through the same orchestrator, so verification, policy, confirmations, guards and handover are identical. Telegram chats appear in the same inbox with a *Telegram* badge, and a human can take over and reply from the dashboard; the reply is delivered to Telegram.
+- **Buttons.** COD and failed-delivery options become inline buttons.
+- **Linking a customer.** `/start` offers a "📱 Share my phone number" button. Telegram only shares the sender's *own* number (forwarded contacts are rejected), so the chat is linked to that customer. From then on, COD confirmations and delivery follow-ups for their orders arrive in Telegram. Linking does **not** reveal order data: order details still need the order number + phone verification.
+- **Reliability.** Updates are de-duplicated by `update_id` and every outbound message is sent exactly once (Redis claim per message id).
+- **Commands.** `/new` starts a fresh conversation.
+
+**Demo:**
+1. `/start` the bot, then share a phone number that matches a seeded customer. Your own number won't match the sample data. Alternatively, ask about an order directly (e.g. "WL10234, phone 9876543210").
+2. For a COD confirmation in Telegram: share your number, then create a test order with that phone via `POST /api/orders/test` with `{"preset":"custom","phone":"<your number>"}`.
+
+### Voice notes
+
+The web chat has a 🎤 button and a language toggle (EN = English/Hinglish, हिं = Hindi). Speech is transcribed by the browser's built-in speech recognition (Chrome/Edge), so no audio reaches our server or Claude. The text goes through the normal agent, and the message is flagged `inputMode: voice` (🎤 badge in the inbox).
+
+**Limitation:** Claude does not accept audio, and server-side transcription would need a separate speech-to-text provider and key. So **Telegram voice messages** get an honest "please type, or use the website's 🎤" reply instead of a guess.
+
+## 12. Known issues and limitations
 
 - **No real authentication for dashboard staff**: a shared admin key only, and it is baked into the frontend bundle. It is fine for a take-home; production needs SSO and roles.
 - **The customer chat token lives in `localStorage`**. Proactive COD/NDR conversations are reached through a token link, simulating an SMS/WhatsApp link to the phone on the order. There is no OTP.
@@ -382,7 +418,7 @@ Admin endpoints require `x-admin-key` (`ADMIN_API_KEY`).
 - **The MOCK engine is deliberately simple**: it covers the scripted flows, not open conversation. Judge the agent's language understanding with a real key.
 - **The eval re-seeds the database** configured in `backend/.env`. Don't point it at data you care about.
 
-## 12. What I'd do next
+## 13. What I'd do next
 
 - WhatsApp Cloud API channel on the same orchestrator, with OTP verification instead of order+phone.
 - Shopify dev store webhooks in place of the seed.

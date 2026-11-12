@@ -18,7 +18,30 @@ export async function startConversation(channel = "web") {
  * delivered to the phone on the order, so the conversation is pre-verified for THAT order only.
  */
 export async function getOrCreateOrderConversation(orderId: string, flow: "COD" | "NDR") {
-  const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+  const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId }, include: { customer: true } });
+
+  // Customer linked their phone to the Telegram bot → deliver there (Telegram verified that number).
+  const tgChat = order.customer.telegramChatId;
+  if (tgChat) {
+    const tg = await prisma.conversation.findFirst({ where: { channel: "telegram", externalChatId: tgChat, status: { not: "RESOLVED" } }, orderBy: { createdAt: "desc" } });
+    if (tg) {
+      return prisma.conversation.update({
+        where: { id: tg.id },
+        data: {
+          customerId: order.customerId,
+          verifiedOrderNumbers: Array.from(new Set([...tg.verifiedOrderNumbers, order.orderNumber])),
+          verifiedAt: tg.verifiedAt ?? new Date(),
+          context: { orderNumber: order.orderNumber, flow },
+        },
+      });
+    }
+    const c = await prisma.conversation.create({
+      data: { token: newToken(), channel: "telegram", externalChatId: tgChat, customerId: order.customerId, verifiedOrderNumbers: [order.orderNumber], verifiedAt: new Date(), context: { orderNumber: order.orderNumber, flow } },
+    });
+    await publish({ type: "conversation:updated", conversationId: c.id, status: c.status });
+    return c;
+  }
+
   const existing = await prisma.conversation.findFirst({
     where: { customerId: order.customerId, status: { not: "RESOLVED" }, verifiedOrderNumbers: { has: order.orderNumber } },
     orderBy: { createdAt: "desc" },

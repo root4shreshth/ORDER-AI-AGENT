@@ -6,7 +6,8 @@ export interface ConversationSummary {
   customerName: string;
   customerPhone: string;
   language: string | null;
-  lastMessage: { role: string; content: string; at: string } | null;
+  channel: string;
+  lastMessage: { role: string; content: string; at: string; voice?: boolean } | null;
   messageCount: number;
   handoverReason: string | null;
   ticket: { id: string; reason: string; mood: string; status: string } | null;
@@ -61,6 +62,7 @@ export interface Ticket {
 export interface ConversationDetail {
   id: string;
   status: ConvStatus;
+  channel: string;
   language: string | null;
   verifiedOrderNumbers: string[];
   failedVerifyCount: number;

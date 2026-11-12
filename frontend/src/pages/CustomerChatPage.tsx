@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "react-router";
 import clsx from "clsx";
-import { Bot, RefreshCw, Send, ShoppingBag, UserRound } from "lucide-react";
+import { Bot, Mic, RefreshCw, Send, ShoppingBag, Square, UserRound } from "lucide-react";
+import { useVoiceInput } from "../lib/useVoiceInput";
 import { api, ApiError } from "../lib/api";
 import { getSocket } from "../lib/socket";
 import type { PublicMessage } from "../lib/types";
@@ -31,6 +32,14 @@ export function CustomerChatPage() {
   const [error, setError] = useState<string | null>(null);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  const [usedVoice, setUsedVoice] = useState(false);
+  const [voiceLang, setVoiceLang] = useState<"en-IN" | "hi-IN">("en-IN");
+  const voice = useVoiceInput(
+    useCallback((spoken: string) => {
+      setText((t) => (t.trim() ? `${t.trim()} ${spoken}` : spoken));
+      setUsedVoice(true);
+    }, []),
+  );
   const [pending, setPending] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -84,12 +93,14 @@ export function CustomerChatPage() {
 
   async function send(msg: string) {
     if (!session || !msg.trim() || sending) return;
+    const inputMode = usedVoice ? "voice" : "text";
     setSending(true);
     setPending(msg.trim());
     setText("");
+    setUsedVoice(false);
     setError(null);
     try {
-      await api.chat.post(`/api/chat/${session.conversationId}/messages`, { text: msg.trim() }, session.token);
+      await api.chat.post(`/api/chat/${session.conversationId}/messages`, { text: msg.trim(), inputMode }, session.token);
       await load(session.token);
     } catch (e) {
       setError((e as Error).message);
@@ -227,6 +238,12 @@ export function CustomerChatPage() {
         <div className="mx-auto max-w-2xl px-4 py-3">
           {muted && <div className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">You're connected to our support team — a person will reply here.</div>}
           {error && <div className="mb-2 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">{error}</div>}
+          {voice.error && <div className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">{voice.error}</div>}
+          {voice.listening && (
+            <div className="mb-2 flex items-center gap-2 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">
+              <span className="size-2 animate-pulse rounded-full bg-rose-500" /> Listening ({voiceLang === "hi-IN" ? "हिंदी" : "English / Hinglish"})… {voice.interim && <em className="text-rose-900">“{voice.interim}”</em>}
+            </div>
+          )}
           <form
             className="flex gap-2"
             onSubmit={(e) => {
@@ -234,7 +251,31 @@ export function CustomerChatPage() {
               void send(text);
             }}
           >
-            <input className="input flex-1" placeholder="Type your message…" value={text} onChange={(e) => setText(e.target.value)} disabled={!session} maxLength={2000} aria-label="Message" />
+            {voice.supported && (
+              <div className="flex shrink-0 overflow-hidden rounded-lg border border-slate-200">
+                <button
+                  type="button"
+                  disabled={!session || sending}
+                  onClick={() => (voice.listening ? voice.stop() : voice.start(voiceLang))}
+                  className={clsx("px-3 disabled:opacity-50", voice.listening ? "bg-rose-500 text-white" : "bg-white text-slate-600 hover:bg-slate-50")}
+                  aria-label={voice.listening ? "Stop voice input" : "Speak your message"}
+                  title="Speak your message (voice note)"
+                >
+                  {voice.listening ? <Square className="size-4" /> : <Mic className="size-4" />}
+                </button>
+                <select
+                  className="border-l border-slate-200 bg-slate-50 px-1.5 text-xs text-slate-600 focus:outline-none"
+                  value={voiceLang}
+                  onChange={(e) => setVoiceLang(e.target.value as "en-IN" | "hi-IN")}
+                  aria-label="Voice language"
+                  title="Voice language"
+                >
+                  <option value="en-IN">EN</option>
+                  <option value="hi-IN">हिं</option>
+                </select>
+              </div>
+            )}
+            <input className="input flex-1" placeholder={voice.supported ? "Type or tap 🎤 to speak…" : "Type your message…"} value={text} onChange={(e) => setText(e.target.value)} disabled={!session} maxLength={2000} aria-label="Message" />
             <button className="btn-primary px-4" disabled={!session || !text.trim() || sending} aria-label="Send">
               <Send className="size-4" />
             </button>

@@ -115,6 +115,8 @@ model Customer {
   name          String
   phone         String         @unique // normalized 10-digit Indian mobile
   email         String?
+  /// Telegram chat linked when the customer shares their phone with the bot
+  telegramChatId String?       @unique
   createdAt     DateTime       @default(now())
   orders        Order[]
   conversations Conversation[]
@@ -289,7 +291,9 @@ model Conversation {
   id                String             @id @default(cuid())
   token             String             @unique // customer-side access token
   customerId        String?
-  channel           String             @default("web")
+  channel           String             @default("web") // web | telegram
+  /// external chat id for non-web channels (Telegram chat_id)
+  externalChatId    String?
   status            ConversationStatus @default(AI_HANDLING)
   language          String?
   verifiedOrderNumbers String[]        @default([])
@@ -313,6 +317,7 @@ model Conversation {
 
   @@index([status])
   @@index([lastMessageAt])
+  @@index([channel, externalChatId])
 }
 
 model Message {

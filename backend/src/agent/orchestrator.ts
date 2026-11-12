@@ -118,7 +118,12 @@ function templateHandoverNote(reason: HandoverReason, text: string, lang: Lang) 
   };
 }
 
-export async function handleCustomerMessage(conversationId: string, rawText: string): Promise<TurnResult> {
+export interface TurnOptions {
+  /** how the customer produced the text (voice = browser speech-to-text) */
+  inputMode?: "text" | "voice";
+}
+
+export async function handleCustomerMessage(conversationId: string, rawText: string, opts: TurnOptions = {}): Promise<TurnResult> {
   const text = rawText.trim().slice(0, 2000);
   const release = await waitForLock(`conv:${conversationId}`);
   const started = Date.now();
@@ -132,7 +137,7 @@ export async function handleCustomerMessage(conversationId: string, rawText: str
     if (detectInjection(text)) flags.push("prompt_injection");
     if (detectOtherCustomerProbe(text)) flags.push("other_customer_probe");
 
-    const customerMessage = await addMessage(prisma, { conversationId, role: "CUSTOMER", content: text, language, meta: flags.length ? { flags } : undefined });
+    const customerMessage = await addMessage(prisma, { conversationId, role: "CUSTOMER", content: text, language, meta: flags.length || opts.inputMode === "voice" ? { ...(flags.length ? { flags } : {}), ...(opts.inputMode === "voice" ? { inputMode: "voice" } : {}) } : undefined });
     await prisma.conversation.update({ where: { id: conv.id }, data: { language } });
     await emitMessage(customerMessage);
     if (flags.length) await audit(prisma, { actor: "system", entityType: "conversation", entityId: conv.id, action: "GUARD_FLAG", meta: { flags, text } });

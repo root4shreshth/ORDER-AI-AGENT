@@ -16,6 +16,7 @@ x-backend-env: &backend-env
   ORDER_WEBHOOK_SECRET: ${ORDER_WEBHOOK_SECRET:-change-me-order-secret}
   COURIER_WEBHOOK_SECRET: ${COURIER_WEBHOOK_SECRET:-change-me-courier-secret}
   ADMIN_API_KEY: ${ADMIN_API_KEY:-change-me-admin-key}
+  TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
 
 services:
   postgres:

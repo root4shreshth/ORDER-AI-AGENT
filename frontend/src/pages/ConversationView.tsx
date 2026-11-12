@@ -58,6 +58,7 @@ function Bubble({ m, calls }: { m: Message; calls: ToolCall[] }) {
         <div className={clsx("mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400", !customer && "justify-end")}>
           <span>{dateTime(m.createdAt)}</span>
           {!customer && <EngineBadge engine={m.engine} />}
+          {m.meta?.inputMode === "voice" && <Badge tone="violet">🎤 voice</Badge>}
           {m.intent && <Badge>{humanize(m.intent)}</Badge>}
           {flags.map((f) => (
             <Badge key={f} tone="red">
@@ -140,6 +141,7 @@ export function ConversationView({ id }: { id: string }) {
             <div className="flex items-center gap-2">
               <span className="truncate font-semibold">{c.customer?.name ?? "Unverified visitor"}</span>
               <ConvStatusBadge status={c.status} />
+              {c.channel === "telegram" && <Badge tone="blue">Telegram</Badge>}
             </div>
             <div className="text-xs text-slate-500">
               {c.customer?.phone ?? "phone not verified"} · verified orders: {c.verifiedOrderNumbers.length ? c.verifiedOrderNumbers.join(", ") : "none"}

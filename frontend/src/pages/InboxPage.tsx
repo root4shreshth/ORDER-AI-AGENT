@@ -58,10 +58,11 @@ export function InboxPage() {
                 <span className="shrink-0 text-[11px] text-slate-400">{timeAgo(c.lastMessageAt)}</span>
               </div>
               <div className="mt-0.5 truncate text-xs text-slate-500">
-                {c.lastMessage ? `${c.lastMessage.role === "CUSTOMER" ? "" : c.lastMessage.role === "AI" ? "Agent: " : c.lastMessage.role === "HUMAN" ? "You: " : ""}${c.lastMessage.content}` : "—"}
+                {c.lastMessage ? `${c.lastMessage.role === "CUSTOMER" ? "" : c.lastMessage.role === "AI" ? "Agent: " : c.lastMessage.role === "HUMAN" ? "You: " : ""}${c.lastMessage.voice ? "🎤 " : ""}${c.lastMessage.content}` : "—"}
               </div>
               <div className="mt-1.5 flex flex-wrap items-center gap-1">
                 <ConvStatusBadge status={c.status} />
+                {c.channel === "telegram" && <Badge tone="blue">Telegram</Badge>}
                 {c.flow && <Badge tone="blue">{c.flow}</Badge>}
                 {c.orderNumber && <Badge>{c.orderNumber}</Badge>}
                 {c.ticket && c.status !== "RESOLVED" && <Badge tone="red">{humanize(c.ticket.reason)}</Badge>}
