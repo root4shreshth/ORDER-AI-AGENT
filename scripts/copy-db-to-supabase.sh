@@ -7,8 +7,17 @@
 # Refuses to run if the target already has our tables (no accidental overwrite).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-URL=$(cat backend/.env.deploy backend/.env 2>/dev/null | grep -E '^SUPABASE_DB_URL=' | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '\r' || true)
-[ -n "$URL" ] || { echo "SUPABASE_DB_URL missing — add it as an extra line in backend/.env"; exit 1; }
+# Read the URL and URL-encode the password (passwords with @, spaces etc. break raw URLs). Never printed.
+URL=$({ cat backend/.env.deploy 2>/dev/null || true; cat backend/.env 2>/dev/null || true; } | node -e '
+  let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
+    const line = s.split(/\r?\n/).find((x) => /^SUPABASE_DB_URL=/.test(x)) || "";
+    const v = line.replace(/^(SUPABASE_DB_URL=)+/, "").trim().replace(/^["\x27]|["\x27]$/g, "");
+    const m = v.match(/^(postgres(?:ql)?:\/\/)([^:]+):(.*)@([^@/]+)(\/.*)?$/);
+    if (!m) process.exit(0);
+    let pass = m[3]; try { pass = decodeURIComponent(pass); } catch {}
+    process.stdout.write(`${m[1]}${m[2]}:${encodeURIComponent(pass)}@${m[4]}${m[5] || "/postgres"}`);
+  });')
+[ -n "$URL" ] || { echo "SUPABASE_DB_URL missing or malformed — add it as an extra line in backend/.env"; exit 1; }
 PSQL=(docker run --rm -i postgres:16-alpine psql "$URL" -v ON_ERROR_STOP=1 -q)
 
 existing=$("${PSQL[@]}" -tA -c "select count(*) from information_schema.tables where table_schema='public' and table_name in ('Order','Customer','_prisma_migrations')")
