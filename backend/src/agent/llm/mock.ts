@@ -12,7 +12,7 @@ import { executeTool } from "../tools/execute.js";
 import type { ToolContext, ToolResult } from "../tools/context.js";
 import { emptyUsage, type Engine, type EngineResult, type HistoryMessage } from "./types.js";
 
-type Intent = "status" | "cancel" | "return" | "exchange" | "address" | "refund" | "size" | "policy" | "pincode" | "cod_confirm" | "cod_pay" | "cod_edit" | "ndr" | "greeting" | "unknown";
+type Intent = "damage" | "status" | "cancel" | "return" | "exchange" | "address" | "refund" | "size" | "policy" | "pincode" | "cod_confirm" | "cod_pay" | "cod_edit" | "ndr" | "greeting" | "unknown";
 
 interface MockState {
   intent?: Intent;
@@ -20,6 +20,7 @@ interface MockState {
   sku?: string;
   newSize?: string;
   awaiting?: "unused" | "refund_method" | "address" | "ndr_detail";
+  phone?: string;
   unknownCount?: number;
 }
 
@@ -56,9 +57,10 @@ function detectIntent(text: string): Intent {
   const t = text.toLowerCase();
   if (/pay\s*online|prepaid|upi|card|5%/.test(t)) return "cod_pay";
   if (/edit\s*address|change\s*(the\s*)?address|deliver\s+(it\s+)?to\s+my|office\s+instead|address\s+(badal|change)|pata\s+badal|पता/.test(t)) return "address";
-  if (/refund\s*(kab|status|kidhar|when)|when.*refund|paisa\s*kab|पैसा\s*कब|रिफंड\s*कब/.test(t)) return "refund";
+  if (/damage|damaged|torn|defect|broken|stain|phat(a|i)|kharab|tuta/.test(t)) return "damage";
+  if (/refund\s*(kab|status|kidhar|when)|when.*refund|paisa\s*kab|पैसा\s*कब|रिफंड\s*कब/.test(t) || (/refund/.test(t) && /processed|received|credited|done|status|where|kab|mila|aaya/.test(t) && !/return|wapas/.test(t))) return "refund";
   if (/cancel|रद्द|nahi\s*chahiye|don'?t\s+want|dont\s+want|no\s+longer\s+want/.test(t)) return "cancel";
-  if (/exchange|size\s*(mil|change|badal)|tight|loose|chhota|bada|badal|बदल|another\s+size|different\s+size/.test(t)) return "exchange";
+  if (/exchange|size\s*(mil|change|badal)|tight|loose|chhota|bada|badal|बदल|another\s+size|different\s+size|instead\s+of\s+(xs|s|m|l|xl|xxl|\d{2})\b/.test(t)) return "exchange";
   if (/return|wapas|वापस|refund\s+me|give.*refund/.test(t)) return "return";
   if (/(which|kaunsa|kaun\s*sa|what)\s*size|size\s*chart|\d\s*'\s*\d|\d+\s*kg|height/.test(t)) return "size";
   if (/\bcod\b|cash\s+on\s+delivery|deliver.*\d{6}|pincode/.test(t)) return "pincode";
@@ -191,19 +193,33 @@ export class MockEngine implements Engine {
       return done(L(lang, "Sorry, I didn't quite get that. Is it about an order's status, a cancellation, a return/exchange, a refund, or sizing?", "Sorry, samajh nahi aaya. Order status, cancel, return/exchange, refund ya size — kis cheez mein madad chahiye?", "माफ़ कीजिए, समझ नहीं आया। ऑर्डर स्टेटस, कैंसल, रिटर्न/एक्सचेंज या रिफंड — किसमें मदद चाहिए?"));
     }
 
+    // Damage claims: the photo requirement and refund decision need a person (manual review policy).
+    if (intent === "damage") {
+      await call("handover_to_human", {
+        reason: "MANUAL_REVIEW_REQUIRED",
+        mood: "frustrated",
+        order_number: e.orderNumber,
+        summary: `Customer reports a damaged item${e.orderNumber ? ` on ${e.orderNumber}` : ""} and wants a resolution. Damage claims without a photo need manual review. Message: "${text.slice(0, 200)}".`,
+        suggested_reply: L(lang, "Hi, I'm from the Wishluck team — really sorry about the damaged item. Could you share a photo so we can sort this out quickly?", "Hi, main Wishluck team se hoon — damaged item ke liye sorry. Kya aap ek photo share kar sakte hain taaki hum jaldi solve kar sakein?"),
+      });
+      return done("");
+    }
+
     // 6. Order-specific intents → verification first.
     state.intent = intent;
     if (e.sku) state.sku = e.sku;
     if (e.size && intent === "exchange") state.newSize = e.size;
+    if (e.phone) state.phone = e.phone;
     const verified = ctx.conversation.verifiedOrderNumbers;
     const orderNumber = e.orderNumber ?? state.orderNumber ?? (verified.length === 1 ? verified[0] : undefined) ?? flowOrder;
     if (orderNumber) state.orderNumber = orderNumber;
+    const phone = e.phone ?? state.phone;
 
     if (!orderNumber || !verified.includes(orderNumber)) {
-      if (orderNumber && e.phone) {
-        const v = await call("verify_customer", { order_number: orderNumber, phone: e.phone });
+      if (orderNumber && phone) {
+        const v = await call("verify_customer", { order_number: orderNumber, phone });
+        state.phone = undefined; // a phone is used for one attempt only
         if (!v.ok) {
-          state.orderNumber = undefined;
           await save();
           if (v.code === "VERIFICATION_LOCKED") {
             await call("handover_to_human", { reason: "VERIFICATION_FAILED", mood: "frustrated", summary: "Customer failed order/phone verification repeatedly. No order details were shared.", suggested_reply: "Hi, I'm from the Wishluck team. I can help verify your order — could you share the order number and the phone number used at checkout?" });
@@ -213,7 +229,7 @@ export class MockEngine implements Engine {
         }
       } else {
         await save();
-        if (!orderNumber) return done(L(lang, "Sure, I can help. Please share your order number (like WL10234) and the phone number used on that order.", "Zaroor! Apna order number (jaise WL10234) aur us order par diya gaya phone number bhejiye.", "ज़रूर! अपना ऑर्डर नंबर (जैसे WL10234) और उस ऑर्डर का फ़ोन नंबर भेजिए।"));
+        if (!orderNumber) return done(L(lang, "Sure, I can help. Please share your order number (it starts with WL) and the phone number used on that order.", "Zaroor! Apna order number (WL se shuru hota hai) aur us order par diya gaya phone number bhejiye.", "ज़रूर! अपना ऑर्डर नंबर (जो WL से शुरू होता है) और उस ऑर्डर का फ़ोन नंबर भेजिए।"));
         return done(L(lang, `To protect your privacy, please share the phone number used on order ${orderNumber}.`, `Aapki privacy ke liye, order ${orderNumber} par diya gaya phone number bhejiye.`, `आपकी सुरक्षा के लिए, ऑर्डर ${orderNumber} पर दिया गया फ़ोन नंबर भेजिए।`));
       }
     }

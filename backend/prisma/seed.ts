@@ -5,6 +5,7 @@
  *   npm run seed            → wipe + reseed
  *   node dist/prisma/seed.js --if-empty   → seed only when the DB has no orders (Docker boot)
  */
+import { randomBytes } from "node:crypto";
 import { PrismaClient, type CourierStatus, type OrderStatus, type PaymentMethod, type Prisma } from "@prisma/client";
 import { CATALOG, PINCODES } from "../src/modules/catalog/data.js";
 import { DEFAULT_SETTINGS } from "../src/modules/settings/settings.js";
@@ -12,6 +13,12 @@ import { POLICY, shippingFee, ETA_DAYS } from "../src/policies/index.js";
 import { scoreCodRisk } from "../src/risk/codRisk.js";
 
 const prisma = new PrismaClient();
+const COD_QUICK_REPLIES = [
+  { id: "CONFIRM", label: "✅ Confirm order" },
+  { id: "CANCEL", label: "❌ Cancel order" },
+  { id: "EDIT_ADDRESS", label: "📍 Edit address" },
+  { id: "PAY_ONLINE", label: "💳 Pay online & get 5% off" },
+];
 const NOW = new Date();
 const DAY = 86_400_000;
 const ago = (days: number, hours = 0) => new Date(NOW.getTime() - days * DAY - hours * 3_600_000);
@@ -333,8 +340,36 @@ export async function seed(): Promise<void> {
         },
         DEFAULT_SETTINGS.risk,
       );
+      // Awaiting / held COD orders already received their confirmation message.
+      let conversationId: string | undefined;
+      if (o.cod === "AWAITING" || o.cod === "ON_HOLD") {
+        const conv = await prisma.conversation.create({
+          data: {
+            token: randomBytes(18).toString("base64url"),
+            customerId: customerId.get(o.customer)!,
+            verifiedOrderNumbers: [o.no],
+            verifiedAt: placedAt,
+            context: { orderNumber: o.no, flow: "COD" },
+            createdAt: placedAt,
+            lastMessageAt: placedAt,
+          },
+        });
+        conversationId = conv.id;
+        const cust = CUSTOMERS.find((c) => c.key === o.customer)!;
+        await prisma.message.create({
+          data: {
+            conversationId: conv.id,
+            role: "AI",
+            engine: "template",
+            createdAt: placedAt,
+            content: `Hi ${cust.name.split(" ")[0]}, thanks for shopping with Wishluck! Please confirm your Cash on Delivery order ${o.no}. Amount to pay on delivery: ₹${(order.total / 100).toLocaleString("en-IN")} (incl. ₹49 COD fee). Pay online now and get 5% off.`,
+            meta: { quickReplies: COD_QUICK_REPLIES, orderNumber: o.no, kind: "COD_CONFIRMATION" },
+          },
+        });
+      }
       await prisma.codConfirmation.create({
         data: {
+          conversationId,
           orderId: order.id,
           riskScore: risk.score,
           riskBand: risk.band,

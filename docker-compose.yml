@@ -1,5 +1,22 @@
 name: wishluck-order-agent
 
+# One command:  docker compose up --build
+# Optional: put ANTHROPIC_API_KEY=... in a root .env file (see .env.example). Without it the
+# agent runs in clearly-labelled MOCK mode.
+
+x-backend-env: &backend-env
+  NODE_ENV: production
+  DATABASE_URL: postgresql://wishluck:wishluck@postgres:5432/wishluck
+  REDIS_URL: redis://redis:6379
+  PUBLIC_API_URL: http://backend:4000
+  WEB_URL: http://localhost:8080
+  CORS_ORIGIN: http://localhost:8080,http://localhost:5173
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-haiku-5-5}
+  ORDER_WEBHOOK_SECRET: ${ORDER_WEBHOOK_SECRET:-change-me-order-secret}
+  COURIER_WEBHOOK_SECRET: ${COURIER_WEBHOOK_SECRET:-change-me-courier-secret}
+  ADMIN_API_KEY: ${ADMIN_API_KEY:-change-me-admin-key}
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -26,15 +43,9 @@ services:
 
   backend:
     build: { context: ., dockerfile: backend/Dockerfile }
-    env_file: [{ path: backend/.env, required: false }]
     environment:
-      NODE_ENV: production
-      DATABASE_URL: postgresql://wishluck:wishluck@postgres:5432/wishluck
-      REDIS_URL: redis://redis:6379
+      <<: *backend-env
       PORT: "4000"
-      PUBLIC_API_URL: http://backend:4000
-      CORS_ORIGIN: http://localhost:8080
-      SEED_ON_START: "true"
     command: ["sh", "-c", "npx prisma migrate deploy && node dist/prisma/seed.js --if-empty && node dist/src/server.js"]
     ports: ["4000:4000"]
     depends_on:
@@ -44,22 +55,22 @@ services:
       test: ["CMD", "wget", "-qO-", "http://localhost:4000/health"]
       interval: 5s
       timeout: 3s
-      retries: 30
+      retries: 40
 
   worker:
     build: { context: ., dockerfile: backend/Dockerfile }
-    env_file: [{ path: backend/.env, required: false }]
-    environment:
-      NODE_ENV: production
-      DATABASE_URL: postgresql://wishluck:wishluck@postgres:5432/wishluck
-      REDIS_URL: redis://redis:6379
-      PUBLIC_API_URL: http://backend:4000
+    environment: *backend-env
     command: ["node", "dist/src/worker.js"]
     depends_on:
       backend: { condition: service_healthy }
 
   frontend:
-    build: { context: ., dockerfile: frontend/Dockerfile }
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_URL: http://localhost:4000
+        VITE_ADMIN_KEY: ${ADMIN_API_KEY:-change-me-admin-key}
     ports: ["8080:80"]
     depends_on:
       backend: { condition: service_healthy }
