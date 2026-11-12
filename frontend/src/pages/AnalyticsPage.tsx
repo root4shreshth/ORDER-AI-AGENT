@@ -30,7 +30,7 @@ function HBar({ data, dataKey, nameKey }: { data: Record<string, unknown>[]; dat
         <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: "#64748b" }} />
         <YAxis type="category" dataKey={nameKey} width={170} tick={{ fontSize: 11, fill: "#334155" }} tickFormatter={(v: string) => humanize(v)} />
         <Tooltip labelFormatter={(v) => humanize(String(v))} />
-        <Bar dataKey={dataKey} fill={BAR} radius={[0, 4, 4, 0]} barSize={18} />
+        <Bar isAnimationActive={false} dataKey={dataKey} fill={BAR} radius={[0, 4, 4, 0]} barSize={18} />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -74,7 +74,7 @@ export function AnalyticsPage() {
                 <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#334155" }} />
                 <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#64748b" }} />
                 <Tooltip />
-                <Bar dataKey="value" fill={BAR} radius={[4, 4, 0, 0]} barSize={36} />
+                <Bar isAnimationActive={false} dataKey="value" fill={BAR} radius={[4, 4, 0, 0]} barSize={36} />
               </BarChart>
             </ResponsiveContainer>
             <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-600">
@@ -95,7 +95,7 @@ export function AnalyticsPage() {
                   <XAxis dataKey="day" tick={{ fontSize: 11, fill: "#64748b" }} />
                   <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#64748b" }} />
                   <Tooltip />
-                  <Line type="monotone" dataKey="messages" stroke={BAR} strokeWidth={2} dot={{ r: 3 }} />
+                  <Line isAnimationActive={false} type="monotone" dataKey="messages" stroke={BAR} strokeWidth={2} dot={{ r: 3 }} />
                 </LineChart>
               </ResponsiveContainer>
             )}
