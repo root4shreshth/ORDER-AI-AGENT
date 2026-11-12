@@ -26,7 +26,7 @@ export interface Ctx {
 export interface Scenario {
   id: string;
   appendixB?: number;
-  category: "Support & verification" | "Returns & exchanges" | "Cancellation & address" | "COD" | "NDR" | "Handover & safety";
+  category: "Support & verification" | "Returns & exchanges" | "Cancellation & address" | "COD" | "NDR" | "Handover & safety" | "Ordering";
   title: string;
   wanted: string;
   expectedOutcome: string;
@@ -388,6 +388,37 @@ export const SCENARIOS: Scenario[] = [
     id: "H10", category: "Handover & safety", title: "Bulk order enquiry",
     wanted: "200 kurtas for a corporate event", expectedOutcome: "Handed to a person",
     steps: [{ say: "I want a bulk order of 200 kurtas for my company" }], expectStatus: "NEEDS_HUMAN",
+  },
+
+  // ---------------------------------------------------------------- ordering in chat
+  {
+    id: "O01", category: "Ordering", title: "Buy a kurta in chat (COD)",
+    wanted: "Order 1 kurta size L, COD, to Pune", expectedOutcome: "Catalogue shown from tools, backend-priced summary, order created only after yes",
+    steps: [
+      { say: "Hi, I want to buy a kurta" },
+      { say: "L size, 1 piece" },
+      { say: "Deliver to Flat 12, Lotus Apartments, MG Road, Pune 411001. Name Neel Shah, mobile 9000055555. Cash on delivery." },
+      { say: "yes" },
+    ],
+    mustCall: ["get_product_info", "propose_new_order", "confirm_action"],
+    db: async (c) => {
+      const o = await c.db.order.findFirst({ where: { customer: { phone: "9000055555" } }, include: { items: true } });
+      return check(!!o && o.source === "chat_web" && o.status === "CONFIRMED" && o.items[0]?.sku === "WL-KUR-01" && o.items[0]?.size === "L" && o.total === 1348_00, `order ${JSON.stringify(o && { source: o.source, status: o.status, total: o.total })}`);
+    },
+  },
+  {
+    id: "O02", category: "Ordering", title: "Order an out-of-stock size",
+    wanted: "Oversized tee in XL (out of stock)", expectedOutcome: "Says XL is out of stock from live data, suggests available sizes, no order",
+    steps: [{ say: "I want to order the oversized graphic tee in XL" }],
+    replyMatches: [/out of stock|not available|unavailable|sold out/i],
+    db: async (c) => check((await c.db.order.count({ where: { source: { startsWith: "chat" } } })) === 0, "an order was created"),
+  },
+  {
+    id: "O03", category: "Ordering", title: "Bulk order in chat",
+    wanted: "15 kurtas", expectedOutcome: "Handed to a person as a bulk order; no order created",
+    steps: [{ say: "I need 15 kurtas in size M for my team" }],
+    expectStatus: "NEEDS_HUMAN",
+    db: async (c) => check((await c.db.order.count({ where: { source: { startsWith: "chat" } } })) === 0, "an order was created"),
   },
 ];
 

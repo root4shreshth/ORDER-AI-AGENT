@@ -8,6 +8,7 @@ import type { OrderRow } from "../lib/types";
 import { dateTime } from "../lib/format";
 import { Badge, EmptyState, ErrorState, Loading, Modal, RiskBadge, StatusBadge, useToast } from "../components/ui";
 import { PageHeader } from "../components/Layout";
+import { NewOrderForm } from "../components/NewOrderForm";
 
 const FILTERS = [
   { key: "all", label: "All orders" },
@@ -31,6 +32,7 @@ export function OrdersPage() {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [phone, setPhone] = useState("");
+  const [tab, setTab] = useState<"order" | "scenarios">("order");
   const qc = useQueryClient();
   const nav = useNavigate();
   const { toast, toastNode } = useToast();
@@ -53,7 +55,7 @@ export function OrdersPage() {
         subtitle="COD risk, confirmation status and deliveries"
         actions={
           <button className="btn-primary" onClick={() => setOpen(true)}>
-            <Plus className="size-4" /> Create test order
+            <Plus className="size-4" /> New order
           </button>
         }
       />
@@ -130,12 +132,31 @@ export function OrdersPage() {
         </div>
       </div>
 
-      <Modal open={open} onClose={() => setOpen(false)} title="Create a test order">
-        <p className="mb-3 text-sm text-slate-500">The order is sent as a signed <code>order.created</code> webhook — the same path a store platform would use — then scored and confirmed by the worker.</p>
+      <Modal open={open} onClose={() => setOpen(false)} title="New order">
+        <div className="mb-4 flex gap-1 border-b border-slate-100 pb-3">
+          {(["order", "scenarios"] as const).map((t) => (
+            <button key={t} onClick={() => setTab(t)} className={clsx("rounded-md px-2.5 py-1 text-xs font-medium", tab === t ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600")}>
+              {t === "order" ? "Enter an order" : "Quick test scenarios"}
+            </button>
+          ))}
+        </div>
+        {tab === "order" ? (
+          <NewOrderForm
+            onCreated={(no) => {
+              setOpen(false);
+              toast(`Order ${no} created — the customer is being notified.`);
+              void qc.invalidateQueries({ queryKey: ["orders"] });
+              setTimeout(() => nav(`/orders/${no}`), 1200);
+            }}
+            onError={(m) => toast(m, "err")}
+          />
+        ) : (
+          <>
+        <p className="mb-3 text-sm text-slate-500">Ready-made scenarios for testing (e.g. Appendix B #7). Sent through the same signed <code>order.created</code> webhook.</p>
         <label className="mb-3 block">
           <span className="label">Customer phone (optional)</span>
           <input className="input" inputMode="numeric" placeholder="e.g. your number, if linked to the Telegram bot" value={phone} onChange={(e) => setPhone(e.target.value)} maxLength={14} />
-          <span className="mt-0.5 block text-[11px] text-slate-400">Leave empty for a random new customer. If this number is linked to @Wishluck_bot, the COD confirmation arrives in Telegram.</span>
+          <span className="mt-0.5 block text-[11px] text-slate-400">Leave empty for a random new customer.</span>
         </label>
         <div className="space-y-2">
           {PRESETS.map((p) => (
@@ -145,6 +166,8 @@ export function OrdersPage() {
             </button>
           ))}
         </div>
+          </>
+        )}
       </Modal>
       {toastNode}
     </div>

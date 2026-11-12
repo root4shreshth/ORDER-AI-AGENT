@@ -16,7 +16,7 @@ interface Session {
 }
 
 const STORAGE_KEY = "wishluck_chat";
-const SUGGESTIONS = ["Where is my order WL10234?", "Do you deliver COD to 795001?", "Which kurta size for 5'8, 70kg?", "I want to return an item"];
+const SUGGESTIONS = ["I want to buy a kurta", "Where is my order WL10234?", "Do you deliver COD to 795001?", "Which kurta size for 5'8, 70kg?", "I want to return an item"];
 
 function readStored(): { conversationId: string; token: string } | null {
   try {

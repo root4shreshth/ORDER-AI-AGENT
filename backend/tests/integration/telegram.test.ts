@@ -50,8 +50,10 @@ describe("Telegram channel", () => {
     await flush();
     const conv = await prisma.conversation.findFirstOrThrow({ where: { channel: "telegram", externalChatId: String(CHAT) } });
     expect(conv.status).toBe("AI_HANDLING");
-    expect(sent).toHaveLength(1);
-    expect(JSON.stringify(sent[0]!.markup)).toContain("request_contact");
+    // 1) welcome with the Shop / My orders / Help menu, 2) share-phone tip (not linked yet)
+    expect(sent).toHaveLength(2);
+    expect(JSON.stringify(sent[0]!.markup)).toContain("qr:SHOP:");
+    expect(JSON.stringify(sent[1]!.markup)).toContain("request_contact");
   });
 
   it("text goes through the same agent (verification + tools) and the reply is sent once", async () => {

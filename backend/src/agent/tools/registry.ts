@@ -19,7 +19,7 @@ import { AppError } from "../../lib/errors.js";
 import { audit } from "../../modules/audit/audit.js";
 import { HANDOVER_REASONS } from "../../modules/tickets/service.js";
 import type { ToolContext, ToolResult } from "./context.js";
-import { cancelPendingAction, confirmPendingAction, proposeAction, ProposeSchema } from "./actions.js";
+import { cancelPendingAction, confirmPendingAction, proposeAction, proposeNewOrder, PlaceOrderSchema, ProposeSchema } from "./actions.js";
 
 interface ToolDef<S extends z.ZodType> {
   name: string;
@@ -37,12 +37,8 @@ const windowEnds = (deliveredAt: Date | null) => (deliveredAt ? fmtDate(addDays(
 
 const OrderNo = z.string().min(3).max(20).describe("Order number in the form WL followed by digits");
 
-/** Phone proven by the channel itself: a Telegram chat linked through the share-own-contact button. */
-export async function channelVerifiedPhone(conv: { channel: string; externalChatId: string | null }): Promise<string | null> {
-  if (conv.channel !== "telegram" || !conv.externalChatId) return null;
-  const c = await prisma.customer.findUnique({ where: { telegramChatId: conv.externalChatId } });
-  return c?.phone ?? null;
-}
+export { channelVerifiedPhone } from "./identity.js";
+import { channelVerifiedPhone } from "./identity.js";
 
 /** Authorization gate for every order-specific tool. */
 export function requireVerified(ctx: ToolContext, orderInput: string): { orderNumber: string } | ToolResult {
@@ -317,6 +313,38 @@ export const TOOLS = [
       "Prepare a change that needs the customer's explicit yes: cancel_order, create_return, create_exchange, change_address (before dispatch / COD address edit), ndr_reschedule (new delivery date within 3 days, YYYY-MM-DD), ndr_update_address, ndr_alternate_phone, ndr_cancel_rto (customer no longer wants a failed-delivery order). The backend re-checks policy and returns a summary; repeat that summary to the customer and ask them to confirm. Nothing changes until confirm_action is called in a LATER turn after the customer says yes.",
     schema: ProposeSchema,
     handler: proposeAction,
+  }),
+
+  define({
+    name: "propose_new_order",
+    description:
+      "Prepare a NEW order the customer wants to place in this chat. First use get_product_info (products, sizes, prices) and collect: product + size + quantity for each item, delivery address with house/flat number and 6-digit pincode, payment method (COD or PREPAID — prepaid saves 5%), and for new customers their name and mobile (on Telegram with channel_verified_phone the mobile is known). The backend prices it, checks stock, COD eligibility and bulk limits, and returns a summary; show it and ask for a yes, then call confirm_action in the next turn.",
+    schema: PlaceOrderSchema,
+    handler: proposeNewOrder,
+  }),
+
+  define({
+    name: "list_my_orders",
+    description: "List the recent orders of a customer whose phone was verified by the channel (<context> shows channel_verified_phone). Not available otherwise — then ask for an order number and phone.",
+    schema: z.object({}),
+    handler: async (ctx) => {
+      const phone = await channelVerifiedPhone(ctx.conversation);
+      if (!phone) return { ok: false, code: "NOT_AVAILABLE", message: "Ask for the order number and the phone number used on it instead." };
+      const orders = await prisma.order.findMany({ where: { customer: { phone } }, orderBy: { placedAt: "desc" }, take: 5, include: { items: { include: { product: true } }, shipment: true } });
+      if (orders.length) {
+        ctx.conversation = await prisma.conversation.update({
+          where: { id: ctx.conversation.id },
+          data: { verifiedOrderNumbers: Array.from(new Set([...ctx.conversation.verifiedOrderNumbers, ...orders.map((o) => o.orderNumber)])), verifiedAt: new Date() },
+        });
+      }
+      return {
+        ok: true,
+        data: {
+          orders: orders.map((o) => ({ order_number: o.orderNumber, placed_on: fmtDate(o.placedAt), status: o.status, courier_status: o.shipment?.status ?? null, total: fmtInr(o.total), items: o.items.map((i) => `${i.product.name} (${i.size}) × ${i.quantity}`) })),
+          note: orders.length ? undefined : "No orders found for this number.",
+        },
+      };
+    },
   }),
 
   define({

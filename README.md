@@ -16,7 +16,7 @@ An AI agent for an Indian D2C fashion store that:
 | Backend | Node.js 22 · Express 5 · TypeScript · Prisma 6 / PostgreSQL 16 · BullMQ / Redis 7 · Socket.IO · Zod |
 | AI | Anthropic SDK, manual tool-use loop, default model `claude-haiku-5-5` (configurable) |
 | Frontend | React 19 · Vite · Tailwind CSS v4 · TanStack Query · Recharts |
-| Tests | Vitest + Supertest (123 tests) · 42-conversation evaluation harness |
+| Tests | Vitest + Supertest (135 tests) · 45-conversation evaluation harness |
 | Infra | Docker Compose (Postgres, Redis, API, worker, web) |
 
 ---
@@ -290,10 +290,10 @@ Integration tests cover all of this: the same order and courier webhook replayed
 npm test
 ```
 
-This runs 123 Vitest tests:
+This runs 135 Vitest tests:
 
-- **82 unit tests**: policy, risk, masking, HMAC, safety, language and yes/no detection.
-- **41 integration tests** (incl. 8 for the Telegram channel): Supertest against an isolated `wishluck_test` database and queue.
+- **83 unit tests**: policy, risk, masking, HMAC, safety, language and yes/no detection.
+- **52 integration tests** (incl. Telegram and in-chat ordering): Supertest against an isolated `wishluck_test` database and queue.
 
 Before the first run, create the test database:
 
@@ -339,7 +339,7 @@ Each scenario runs through the **real HTTP API** (chat, signed webhooks, courier
 
 An automatic **grounding check** fails any reply that states an order number, AWB, ₹ amount or date that doesn't appear in that conversation's tool outputs (the only exceptions are policy constants such as ₹49 and ₹299).
 
-**Latest run on real Claude (`claude-haiku-5-5`): 41/42 passed, 12/12 Appendix B, 4/4 injection and data-leak cases, ~3.1 s per reply, ~$0.0015 per chat.** The one failure, and the history of what earlier runs found and how it was fixed, are explained in the report.
+**Latest run on real Claude (`claude-haiku-5-5`): 45/45 passed (42 support + 3 ordering), 12/12 Appendix B, 4/4 injection and data-leak cases, ~3.2 s per reply, ~$0.0019 per chat.** Earlier runs (39 → 40 → 41 → 41 → 45) and what each fix was are in the report — model output varies, so one perfect run is not a guarantee.
 
 Results go to [`docs/TEST_RESULTS.md`](docs/TEST_RESULTS.md):
 
@@ -377,6 +377,7 @@ Admin endpoints require `x-admin-key` (`ADMIN_API_KEY`).
 | Bonus (from the brief) | Status |
 |---|---|
 | Docker setup that starts everything with one command | ✅ `docker compose up --build` |
+| Shop assistant in chat (beyond the brief) | ✅ customers order in Telegram / web chat; welcome message + team alert for every new order |
 | LLM cost view on the dashboard | ✅ Analytics → "LLM usage & cost", plus cost and latency on every AI reply in the inbox |
 | WhatsApp Cloud API | ➡️ **Telegram instead** (see below) — same agent, second channel |
 | Voice note support | ✅ Web chat 🎤 button (browser speech-to-text, English/Hinglish and Hindi) |
@@ -402,6 +403,18 @@ Admin endpoints require `x-admin-key` (`ADMIN_API_KEY`).
 **Demo:**
 1. `/start` the bot, then share a phone number that matches a seeded customer. Your own number won't match the sample data. Alternatively, ask about an order directly (e.g. "WL10234, phone 9876543210").
 2. For a COD confirmation in Telegram: share your number with the bot (a customer profile is created if it is new), then in **Orders → Create test order** enter that number in "Customer phone" and pick a COD preset.
+
+### Shopping in chat, order welcome messages and team alerts
+
+The agent is also a **shop assistant**: customers can buy in Telegram or the web chat, not just get support.
+
+- **Ordering in chat.** The agent shows products, sizes and prices from the catalogue tool (never invented). It collects size and quantity, the address with pincode, and COD or prepaid (prepaid saves 5%). It then calls `propose_new_order`. The **backend** prices the order, checks live stock, COD eligibility and the bulk limit (more than 10 pieces goes to a person), and returns a summary. The order is created only after the customer's "yes" in a later turn. COD orders placed this way are already confirmed by that yes, so there's no second COD confirmation, though the risk score is still recorded. The order shows `source: chat_telegram` / `chat_web` on the dashboard.
+- **On Telegram,** linked customers don't type their number. "📦 My orders" lists their recent orders, and `/start` shows a menu: 🛍 Shop · 📦 My orders · 💬 Help.
+- **Every new order greets the customer.** COD orders get the COD confirmation (summary, amount and buttons). Prepaid and dashboard-entered orders get a welcome message with the items, total and delivery estimate, plus Track / Help buttons. Customers linked to Telegram receive it there.
+- **The team hears about every new order:**
+  - a live alert in the dashboard (top-right, links to the order);
+  - optionally a Telegram team chat. Add the bot to a group, send `/chatid`, and set `TEAM_TELEGRAM_CHAT_ID=<id>` in `backend/.env`.
+- **Real order entry for staff.** Orders → **New order** has a form with an existing customer (✈️ marks Telegram-linked customers) or a new one, items with live stock, address and payment. It goes through the same signed order webhook as the store, so the customer is notified exactly as for a store order. The old presets stay under "Quick test scenarios".
 
 ### Voice notes
 

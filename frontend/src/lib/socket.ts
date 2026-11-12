@@ -29,12 +29,14 @@ export function useAdminLiveUpdates(): void {
     s.on("message:new", onConv);
     s.on("conversation:updated", onConv);
     s.on("order:updated", onOrder);
+    s.on("order:new", onOrder);
     s.on("ticket:new", onTicket);
     return () => {
       s.off("connect", join);
       s.off("message:new", onConv);
       s.off("conversation:updated", onConv);
       s.off("order:updated", onOrder);
+      s.off("order:new", onOrder);
       s.off("ticket:new", onTicket);
     };
   }, [qc]);

@@ -17,6 +17,7 @@ x-backend-env: &backend-env
   COURIER_WEBHOOK_SECRET: ${COURIER_WEBHOOK_SECRET:-change-me-courier-secret}
   ADMIN_API_KEY: ${ADMIN_API_KEY:-change-me-admin-key}
   TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+  TEAM_TELEGRAM_CHAT_ID: ${TEAM_TELEGRAM_CHAT_ID:-}
 
 services:
   postgres:

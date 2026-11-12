@@ -12,7 +12,25 @@ const NDR_TEXT: Record<string, string> = {
   NDR_CANCEL: "I don't want the order any more",
 };
 
+/** General menu buttons (Telegram /start menu, order welcome message) — sent to the agent as text. */
+const MENU_TEXT: Record<string, (orderNumber?: string | null) => string> = {
+  SHOP: () => "I want to shop — show me your products",
+  MY_ORDERS: () => "Show my orders",
+  HELP: () => "I need help with an order",
+  TRACK: (o) => (o ? `Where is my order ${o}?` : "Where is my order?"),
+};
+export const MENU_QUICK_REPLIES = [
+  { id: "SHOP", label: "🛍 Shop" },
+  { id: "MY_ORDERS", label: "📦 My orders" },
+  { id: "HELP", label: "💬 Help" },
+];
+
 export async function handleQuickReply(conversationId: string, choice: string, orderNumber?: string | null): Promise<{ reply: Message | null; status?: string }> {
+  const menu = MENU_TEXT[choice];
+  if (menu) {
+    const turn = await handleCustomerMessage(conversationId, menu(orderNumber));
+    return { reply: turn.reply, status: turn.status };
+  }
   if ((COD_CHOICES as readonly string[]).includes(choice)) {
     if (!orderNumber) throw new AppError(400, "ORDER_REQUIRED", "orderNumber required");
     const r = await respondFromChat(conversationId, orderNumber, choice as CodChoice);

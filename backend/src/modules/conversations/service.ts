@@ -17,7 +17,7 @@ export async function startConversation(channel = "web") {
  * Proactive conversation for an order (COD confirmation / NDR follow-up). The message is
  * delivered to the phone on the order, so the conversation is pre-verified for THAT order only.
  */
-export async function getOrCreateOrderConversation(orderId: string, flow: "COD" | "NDR") {
+export async function getOrCreateOrderConversation(orderId: string, flow: "COD" | "NDR" | "ORDER") {
   const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId }, include: { customer: true } });
 
   // Customer linked their phone to the Telegram bot → deliver there (Telegram verified that number).

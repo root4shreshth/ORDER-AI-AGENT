@@ -117,6 +117,7 @@ model Customer {
   email         String?
   /// Telegram chat linked when the customer shares their phone with the bot
   telegramChatId String?       @unique
+  telegramUsername String?
   createdAt     DateTime       @default(now())
   orders        Order[]
   conversations Conversation[]
@@ -177,6 +178,8 @@ model Order {
   cancelledAt     DateTime?
   cancelReason    String?
   rtoReason       String?
+  /// where the order came from: store (webhook) | dashboard | chat_telegram | chat_web
+  source          String          @default("store")
   notes           Json            @default("[]") // [{ at, by, text }]
   version         Int             @default(0)
   createdAt       DateTime        @default(now())
@@ -360,7 +363,7 @@ model ToolCall {
 model PendingAction {
   id             String              @id @default(cuid())
   conversationId String
-  orderId        String
+  orderId        String? // null for place_order (the order doesn't exist yet)
   type           String
   params         Json
   summary        String
@@ -370,7 +373,7 @@ model PendingAction {
   result         Json?
   createdAt      DateTime            @default(now())
   conversation   Conversation        @relation(fields: [conversationId], references: [id])
-  order          Order               @relation(fields: [orderId], references: [id])
+  order          Order?              @relation(fields: [orderId], references: [id])
 
   @@index([conversationId, status])
 }

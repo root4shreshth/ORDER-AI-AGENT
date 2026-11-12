@@ -11,13 +11,15 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma.js";
 import { AppError } from "../../lib/errors.js";
 import { fmtDate, fmtInr, normalizeOrderNumber, normalizePhone } from "../../lib/format.js";
-import { checkAddressChange, checkCancellation, checkRescheduleDate } from "../../policies/index.js";
+import { checkAddressChange, checkCancellation, checkRescheduleDate, deliveryEstimate } from "../../policies/index.js";
 import { cancelOrder, changeAddress, createExchange, createReturn, evaluateExchange, evaluateReturn, getOrderByNumber, getPincode, type OrderWithItems } from "../../modules/orders/service.js";
 import { addAlternatePhone, requestRto, rescheduleDelivery, updateNdrAddress } from "../../modules/ndr/service.js";
 import { respondToCod } from "../../modules/cod/service.js";
 import { getSettings } from "../../modules/settings/settings.js";
 import { audit } from "../../modules/audit/audit.js";
 import { isAffirmative } from "../safety.js";
+import { createOrder, quoteOrder, quoteSummary } from "../../modules/orders/ingest.js";
+import { channelVerifiedPhone } from "./identity.js";
 import type { ToolContext, ToolResult } from "./context.js";
 
 export const ACTIONS = ["cancel_order", "create_return", "create_exchange", "change_address", "ndr_reschedule", "ndr_update_address", "ndr_alternate_phone", "ndr_cancel_rto"] as const;
@@ -198,15 +200,19 @@ export async function confirmPendingAction(ctx: ToolContext, input: { pending_ac
   if (!isAffirmative(ctx.customerText)) {
     return { ok: false, code: "NO_CLEAR_YES", message: "The customer's latest message is not a clear yes. Ask them to confirm explicitly (yes / no)." };
   }
-  if (!ctx.conversation.verifiedOrderNumbers.includes(pa.order.orderNumber)) return { ok: false, code: "NOT_VERIFIED", message: "Order is not verified in this chat." };
+  if (pa.type !== "place_order" && (!pa.order || !ctx.conversation.verifiedOrderNumbers.includes(pa.order.orderNumber))) return { ok: false, code: "NOT_VERIFIED", message: "Order is not verified in this chat." };
 
   // claim first: a concurrent second confirm can't execute twice
   const claimed = await prisma.pendingAction.updateMany({ where: { id: pa.id, status: "PENDING" }, data: { status: "EXECUTED" } });
   if (claimed.count !== 1) return { ok: false, code: "ACTION_ALREADY_HANDLED", message: "This action was already handled." };
   try {
-    const result = await execute(pa.type as ActionType, pa.order.orderNumber, pa.params as Record<string, unknown>);
-    await prisma.pendingAction.update({ where: { id: pa.id }, data: { result: result as unknown as Prisma.InputJsonValue } });
-    await audit(prisma, { actor: "ai", entityType: "order", entityId: pa.order.orderNumber, action: `CONFIRMED_${pa.type.toUpperCase()}`, newValue: { summary: pa.summary }, meta: { pendingActionId: pa.id, conversationId: ctx.conversationId } });
+    const result =
+      pa.type === "place_order"
+        ? await executePlaceOrder(ctx, pa.params as unknown as PlaceOrderParams)
+        : await execute(pa.type as ActionType, pa.order!.orderNumber, pa.params as Record<string, unknown>);
+    await prisma.pendingAction.update({ where: { id: pa.id }, data: { result: result as unknown as Prisma.InputJsonValue, ...(pa.type === "place_order" ? { orderId: (result as { order_id: string }).order_id } : {}) } });
+    const entityId = pa.type === "place_order" ? (result as { order_number: string }).order_number : pa.order!.orderNumber;
+    await audit(prisma, { actor: "ai", entityType: "order", entityId, action: `CONFIRMED_${pa.type.toUpperCase()}`, newValue: { summary: pa.summary }, meta: { pendingActionId: pa.id, conversationId: ctx.conversationId } });
     return { ok: true, code: "DONE", message: "Action completed. Tell the customer exactly what the result says.", data: result };
   } catch (e) {
     const code = e instanceof AppError ? e.code : /courier/i.test(String(e)) ? "COURIER_UNAVAILABLE" : "INTERNAL_ERROR";
@@ -224,4 +230,89 @@ export async function confirmPendingAction(ctx: ToolContext, input: { pending_ac
 export async function cancelPendingAction(ctx: ToolContext, input: { pending_action_id: string }): Promise<ToolResult> {
   const r = await prisma.pendingAction.updateMany({ where: { id: input.pending_action_id, conversationId: ctx.conversationId, status: "PENDING" }, data: { status: "CANCELLED" } });
   return r.count ? { ok: true, code: "DISCARDED", message: "Proposed action discarded; nothing was changed." } : { ok: false, code: "PENDING_ACTION_NOT_FOUND", message: "Nothing to discard." };
+}
+
+// ---------------------------------------------------------------- new orders placed in chat
+export const PlaceOrderSchema = z.object({
+  items: z
+    .array(z.object({ sku: z.string().min(3).max(20).describe("Product code from get_product_info, e.g. WL-KUR-01"), size: z.string().min(1).max(5), quantity: z.number().int().min(1).max(20) }))
+    .min(1)
+    .max(10),
+  payment_method: z.enum(["COD", "PREPAID"]).describe("COD = pay on delivery (₹49 fee); PREPAID = pay online and save 5%"),
+  customer_name: z.string().min(2).max(80).optional().describe("Needed for new customers"),
+  phone: z.string().max(20).optional().describe("Customer mobile; omit when <context> shows channel_verified_phone"),
+  address_line1: z.string().min(5).max(200).describe("House/flat number and street"),
+  address_line2: z.string().max(200).optional(),
+  landmark: z.string().max(120).optional(),
+  pincode: z.string().regex(/^\d{6}$/),
+});
+export type PlaceOrderInput = z.infer<typeof PlaceOrderSchema>;
+interface PlaceOrderParams extends PlaceOrderInput {
+  phone: string;
+  customer_name: string;
+}
+
+export async function proposeNewOrder(ctx: ToolContext, input: PlaceOrderInput): Promise<ToolResult> {
+  const phone = (await channelVerifiedPhone(ctx.conversation)) ?? (input.phone ? normalizePhone(input.phone) : null);
+  if (!phone) return missing("the 10-digit mobile number for this order");
+  const existing = await prisma.customer.findUnique({ where: { phone } });
+  const name = existing?.name ?? input.customer_name;
+  if (!name) return missing("the customer's name for the order");
+  if (!/\d/.test(input.address_line1)) return missing("the house/flat number in the delivery address");
+  let quote;
+  try {
+    quote = await quoteOrder({ items: input.items, pincode: input.pincode, paymentMethod: input.payment_method, prepaidDiscount: true });
+  } catch (e) {
+    if (e instanceof AppError) {
+      if (e.code === "BULK_ORDER") return refuse("BULK_ORDER", `${e.message} Hand the chat over to a human (reason BULK_ORDER).`, { requires_handover: true });
+      return refuse(e.code, e.message);
+    }
+    throw e;
+  }
+  const s = await getSettings();
+  const summary =
+    `Place a new order for ${name} (mobile ending ${phone.slice(-4)}). ${quoteSummary(quote, input.payment_method)}. Address: ${input.address_line1}${input.address_line2 ? `, ${input.address_line2}` : ""}${input.landmark ? ` (landmark: ${input.landmark})` : ""}.`;
+  await prisma.pendingAction.updateMany({ where: { conversationId: ctx.conversationId, status: "PENDING" }, data: { status: "CANCELLED" } });
+  const params: PlaceOrderParams = { ...input, phone, customer_name: name };
+  const pa = await prisma.pendingAction.create({
+    data: { conversationId: ctx.conversationId, orderId: null, type: "place_order", params: params as unknown as Prisma.InputJsonValue, summary, turnId: ctx.turnId, expiresAt: new Date(Date.now() + s.agent.pendingActionTtlMin * 60_000) },
+  });
+  return {
+    ok: true,
+    code: "AWAITING_CUSTOMER_CONFIRMATION",
+    message:
+      "Show this order summary (items, total, payment, address, delivery time) and ask the customer to reply yes to place it." +
+      (input.payment_method === "COD" ? ` Mention they can pay online instead and save ${s.cod.prepaidDiscountPct}%.` : ""),
+    data: { pending_action_id: pa.id, summary, total: fmtInr(quote.total), eligible: true },
+  };
+}
+
+async function executePlaceOrder(ctx: ToolContext, p: PlaceOrderParams) {
+  const r = await createOrder({
+    customer: { name: p.customer_name, phone: p.phone },
+    items: p.items,
+    pincode: p.pincode,
+    address: { line1: p.address_line1, line2: p.address_line2, landmark: p.landmark },
+    paymentMethod: p.payment_method,
+    prepaidDiscount: true,
+    source: ctx.conversation.channel === "telegram" ? "chat_telegram" : "chat_web",
+    confirmedInChat: true,
+    actor: "ai",
+  });
+  const order = await prisma.order.findUniqueOrThrow({ where: { id: r.orderId } });
+  // The customer just placed this order here → this chat may discuss it.
+  ctx.conversation = await prisma.conversation.update({
+    where: { id: ctx.conversationId },
+    data: { customerId: order.customerId, verifiedOrderNumbers: Array.from(new Set([...ctx.conversation.verifiedOrderNumbers, r.orderNumber])), verifiedAt: new Date(), context: { ...(ctx.conversation.context as object), orderNumber: r.orderNumber } },
+  });
+  const pin = await prisma.pincode.findUniqueOrThrow({ where: { pincode: order.pincode } });
+  return {
+    order_id: order.id,
+    order_number: r.orderNumber,
+    status: order.status,
+    total: fmtInr(order.total),
+    payment: order.paymentMethod === "COD" ? `pay ${fmtInr(order.total)} on delivery` : "pay online",
+    payment_link: r.paymentLink ?? null,
+    delivery_estimate: deliveryEstimate(pin.zone).text,
+  };
 }

@@ -1,9 +1,10 @@
-import { NavLink, Outlet } from "react-router";
+import { useEffect, useState } from "react";
+import { Link, NavLink, Outlet } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
-import { BarChart3, MessageSquare, Package, ScrollText, Settings, ExternalLink, Bot } from "lucide-react";
+import { BarChart3, MessageSquare, Package, ScrollText, Settings, ExternalLink, Bot, ShoppingBag } from "lucide-react";
 import { api } from "../lib/api";
-import { useAdminLiveUpdates } from "../lib/socket";
+import { getSocket, useAdminLiveUpdates } from "../lib/socket";
 import { Badge } from "./ui";
 
 interface SystemInfo {
@@ -19,6 +20,38 @@ const NAV = [
   { to: "/audit", label: "Audit log", icon: ScrollText },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
+
+const SOURCE_LABEL: Record<string, string> = { store: "website store", dashboard: "dashboard", chat_telegram: "Telegram chat", chat_web: "website chat" };
+
+/** Live team alert for every new order (from the event bus via Socket.IO). */
+function NewOrderAlerts() {
+  const [alerts, setAlerts] = useState<{ orderNumber: string; source: string; total: number; at: number }[]>([]);
+  useEffect(() => {
+    const s = getSocket();
+    const onNew = (e: { orderNumber: string; source: string; total: number }) => setAlerts((a) => [{ ...e, at: Date.now() }, ...a].slice(0, 3));
+    s.on("order:new", onNew);
+    return () => {
+      s.off("order:new", onNew);
+    };
+  }, []);
+  useEffect(() => {
+    if (!alerts.length) return;
+    const t = setTimeout(() => setAlerts((a) => a.filter((x) => Date.now() - x.at < 9000)), 9500);
+    return () => clearTimeout(t);
+  }, [alerts]);
+  return (
+    <div className="fixed top-4 right-4 z-50 space-y-2" role="status" aria-live="polite">
+      {alerts.map((a) => (
+        <Link key={a.orderNumber + a.at} to={`/orders/${a.orderNumber}`} className="flex items-center gap-3 rounded-xl bg-slate-900 px-4 py-3 text-sm text-white shadow-lg hover:bg-slate-800">
+          <ShoppingBag className="size-4 text-emerald-300" />
+          <span>
+            New order <b>{a.orderNumber}</b> · ₹{(a.total / 100).toLocaleString("en-IN")} · via {SOURCE_LABEL[a.source] ?? a.source}
+          </span>
+        </Link>
+      ))}
+    </div>
+  );
+}
 
 export function Layout() {
   useAdminLiveUpdates();
@@ -71,6 +104,7 @@ export function Layout() {
           )}
         </div>
       </aside>
+      <NewOrderAlerts />
       <main className="min-w-0 flex-1 overflow-auto">
         <Outlet />
       </main>

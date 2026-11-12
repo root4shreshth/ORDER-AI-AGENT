@@ -29,6 +29,17 @@ export const POLICY = {
   MANUAL_REVIEW_RETURNS_IN_60_DAYS: 3,
 } as const;
 
+/** Orders above this many units are bulk/wholesale enquiries → handled by a person. */
+export const BULK_ORDER_UNITS = 10;
+
+export function checkOrderQuantity(items: { quantity: number }[]): Decision {
+  const units = items.reduce((s, i) => s + i.quantity, 0);
+  if (units > BULK_ORDER_UNITS) {
+    return { allowed: false, code: "BULK_ORDER", reason: `Orders of more than ${BULK_ORDER_UNITS} pieces are handled by our team as bulk orders.`, requiresManualReview: true };
+  }
+  return { allowed: true, code: "QUANTITY_OK", reason: "Quantity is fine." };
+}
+
 export const ETA_DAYS: Record<Zone, [number, number]> = {
   METRO: [2, 4],
   REST: [4, 7],

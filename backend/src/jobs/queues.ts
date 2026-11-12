@@ -17,7 +17,9 @@ export type JobData =
   | { name: "cod-reminder"; orderId: string }
   | { name: "cod-hold"; orderId: string }
   | { name: "ndr-outreach"; shipmentId: string; eventId: string }
-  | { name: "ndr-no-response"; shipmentId: string; attempt: number };
+  | { name: "ndr-no-response"; shipmentId: string; attempt: number }
+  | { name: "order-welcome"; orderId: string }
+  | { name: "team-new-order"; orderId: string };
 
 let queue: Queue | undefined;
 export function jobsQueue(): Queue {

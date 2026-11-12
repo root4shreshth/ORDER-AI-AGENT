@@ -129,14 +129,14 @@ export function Modal({ open, onClose, title, children }: { open: boolean; onClo
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={onClose}>
-      <div className="card w-full max-w-lg" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title}>
+      <div className="card flex max-h-[92vh] w-full max-w-lg flex-col" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title}>
         <header className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
           <h2 className="text-sm font-semibold">{title}</h2>
           <button className="rounded p-1 text-slate-400 hover:bg-slate-100" onClick={onClose} aria-label="Close">
             <X className="size-4" />
           </button>
         </header>
-        <div className="p-4">{children}</div>
+        <div className="scroll-thin overflow-y-auto p-4">{children}</div>
       </div>
     </div>
   );

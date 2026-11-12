@@ -9,6 +9,7 @@ export type AppEvent =
   | { type: "message:new"; conversationId: string; message: unknown }
   | { type: "conversation:updated"; conversationId: string; status?: string }
   | { type: "order:updated"; orderId: string; orderNumber: string }
+  | { type: "order:new"; orderId: string; orderNumber: string; source: string; total: number }
   | { type: "ticket:new"; conversationId: string; ticketId: string };
 
 const CHANNEL = "wishluck:events";

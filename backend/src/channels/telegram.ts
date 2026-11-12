@@ -24,7 +24,7 @@ import { maskPhone } from "../lib/mask.js";
 import { subscribe } from "../lib/events.js";
 import { newToken, addMessage, emitMessage } from "../modules/conversations/service.js";
 import { handleCustomerMessage } from "../agent/orchestrator.js";
-import { handleQuickReply } from "../modules/conversations/quickReplies.js";
+import { handleQuickReply, MENU_QUICK_REPLIES } from "../modules/conversations/quickReplies.js";
 import { audit } from "../modules/audit/audit.js";
 import { publish } from "../lib/events.js";
 
@@ -55,6 +55,15 @@ type ReplyMarkup =
   | { keyboard: { text: string; request_contact?: boolean }[][]; resize_keyboard: boolean; one_time_keyboard: boolean }
   | { remove_keyboard: true };
 
+/** Escape for Telegram HTML mode and turn stray **bold** markdown into <b>bold</b>. */
+export function toTelegramHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+}
+
 /** Thin Telegram Bot API client — swappable in tests. */
 export interface TelegramTransport {
   sendMessage(chatId: string, text: string, markup?: ReplyMarkup): Promise<void>;
@@ -76,7 +85,7 @@ export class TelegramApi implements TelegramTransport {
     return json.result;
   }
   async sendMessage(chatId: string, text: string, markup?: ReplyMarkup) {
-    await this.call("sendMessage", { chat_id: chatId, text: text.slice(0, 4000), reply_markup: markup, link_preview_options: { is_disabled: true } });
+    await this.call("sendMessage", { chat_id: chatId, text: toTelegramHtml(text.slice(0, 4000)), parse_mode: "HTML", reply_markup: markup, link_preview_options: { is_disabled: true } });
   }
   async sendChatAction(chatId: string, action: "typing") {
     await this.call("sendChatAction", { chat_id: chatId, action }).catch(() => undefined);
@@ -130,13 +139,22 @@ export async function handleTelegramUpdate(u: TgUpdate, transport: TelegramTrans
   const chatId = String(msg.chat.id);
   const text = msg.text?.trim() ?? "";
 
+  if (text === "/chatid") {
+    // Setup helper for TEAM_TELEGRAM_CHAT_ID (works in a team group too). Not stored as a conversation.
+    await transport.sendMessage(chatId, `This chat's id is ${chatId}. To send new-order alerts here, set TEAM_TELEGRAM_CHAT_ID=${chatId} in backend/.env and restart the worker.`);
+    return;
+  }
   if (text === "/start" || text.startsWith("/start ")) {
     const conv = await findOrCreateTelegramConversation(chatId);
+    const linked = await prisma.customer.findUnique({ where: { telegramChatId: chatId } });
     await botSays(
       conv.id,
-      `Namaste${msg.from?.first_name ? ` ${msg.from.first_name}` : ""}! I'm the Wishluck support assistant. Ask me about your order status, returns, exchanges, refunds, COD or sizes — in English, Hindi or Hinglish.\n\nTip: tap "Share my phone number" to get COD confirmations and delivery updates for your orders here.`,
-      { telegram: { requestContact: true } },
+      `Namaste${msg.from?.first_name ? ` ${msg.from.first_name}` : ""}! 🙏 Welcome to Wishluck.\nI'm your shopping and support assistant — I can help you buy kurtas, tees, jeans and more, track your orders, and sort out returns, exchanges and refunds. English, Hindi or Hinglish — whatever you prefer.\n\nWhat would you like to do?`,
+      { quickReplies: MENU_QUICK_REPLIES } as Prisma.InputJsonValue,
     );
+    if (!linked) {
+      await botSays(conv.id, `Tip: tap "📱 Share my phone number" below — your order updates will then come here, and you won't need to type your number for your own orders.`, { telegram: { requestContact: true } });
+    }
     return;
   }
   if (text === "/new") {
@@ -165,7 +183,7 @@ export async function handleTelegramUpdate(u: TgUpdate, transport: TelegramTrans
       (await prisma.customer.create({ data: { phone, name: [msg.contact.first_name ?? msg.from.first_name ?? "Customer"].join(" ").slice(0, 80) } }));
     await prisma.$transaction([
       prisma.customer.updateMany({ where: { telegramChatId: chatId, id: { not: customer.id } }, data: { telegramChatId: null } }),
-      prisma.customer.update({ where: { id: customer.id }, data: { telegramChatId: chatId } }),
+      prisma.customer.update({ where: { id: customer.id }, data: { telegramChatId: chatId, telegramUsername: msg.from.username ?? null } }),
       prisma.conversation.update({ where: { id: conv.id }, data: { customerId: customer.id } }),
     ]);
     await audit(prisma, { actor: "customer", entityType: "conversation", entityId: conv.id, action: "TELEGRAM_LINKED", meta: { phone: maskPhone(phone) } });

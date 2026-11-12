@@ -18,7 +18,7 @@ import { audit } from "../modules/audit/audit.js";
 import { publish } from "../lib/events.js";
 import { detectEscalation, detectInjection, detectLanguage, detectOtherCustomerProbe, type Lang } from "./safety.js";
 import { renderContext } from "./prompts.js";
-import { channelVerifiedPhone } from "./tools/registry.js";
+import { channelVerifiedPhone } from "./tools/identity.js";
 import { maskPhone } from "../lib/mask.js";
 import type { ToolContext } from "./tools/context.js";
 import type { Engine, EngineResult, HistoryMessage } from "./llm/types.js";
@@ -51,6 +51,8 @@ const FALLBACK: Record<Lang, string> = {
 };
 
 const INTENT_BY_TOOL: Record<string, string> = {
+  propose_new_order: "new_order",
+  list_my_orders: "order_status",
   get_shipment_status: "order_status",
   get_order_details: "order_status",
   check_cancellation_eligibility: "cancel_order",

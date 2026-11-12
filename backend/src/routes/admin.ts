@@ -6,7 +6,7 @@ import { z } from "zod";
 import { env, llmEngine } from "../config/env.js";
 import { prisma } from "../lib/prisma.js";
 import { AppError, notFound } from "../lib/errors.js";
-import { fmtInr } from "../lib/format.js";
+import { fmtInr, normalizePhone } from "../lib/format.js";
 import { maskPhone, maskEmail, maskDeep } from "../lib/mask.js";
 import { signBody } from "../lib/hmac.js";
 import { transitionOwnership, humanReply } from "../modules/conversations/service.js";
@@ -16,7 +16,7 @@ import { getAnalytics } from "../modules/analytics/service.js";
 import { getSettings, saveSettings, SettingsSchema, DEMO_TIMINGS, DEFAULT_SETTINGS } from "../modules/settings/settings.js";
 import { audit } from "../modules/audit/audit.js";
 import { jobsQueue } from "../jobs/queues.js";
-import { nextOrderNumber } from "../modules/orders/ingest.js";
+import { nextOrderNumber, quoteOrder } from "../modules/orders/ingest.js";
 
 const h = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, next: NextFunction) => fn(req, res).catch(next);
 
@@ -180,6 +180,74 @@ export function adminRouter(): Router {
     const payload = await emitCourierEvent(shipment.awb, body.type, body.reason, body.event_id);
     await audit(prisma, { actor: `human:${agentName(req)}`, entityType: "courier", entityId: shipment.awb, action: "TEST_EVENT_TRIGGERED", newValue: { type: body.type, reason: body.reason }, meta: { order: o.orderNumber, eventId: payload.event_id } });
     res.status(202).json({ queued: true, event: payload });
+  }));
+
+  // ---------------------------------------------------------------- real order entry (dashboard)
+  r.get("/customers", h(async (req, res) => {
+    const q = String(req.query.q ?? "").trim();
+    const rows = await prisma.customer.findMany({
+      where: q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { phone: { endsWith: q.replace(/\D/g, "") || "__none__" } }] } : {},
+      orderBy: [{ telegramChatId: { sort: "asc", nulls: "last" } }, { name: "asc" }],
+      take: 100,
+      include: { _count: { select: { orders: true } } },
+    });
+    res.json(rows.map((c) => ({ id: c.id, name: c.name, phone: maskPhone(c.phone), telegramLinked: !!c.telegramChatId, telegramUsername: c.telegramUsername, orders: c._count.orders })));
+  }));
+
+  r.get("/catalog", h(async (_req, res) => {
+    const products = await prisma.product.findMany({ orderBy: { sku: "asc" }, include: { variants: true } });
+    res.json(products.map((p) => ({ sku: p.sku, name: p.name, price: p.priceInr, priceText: fmtInr(p.priceInr), returnRule: p.notes, sizes: p.variants.map((v) => ({ size: v.size, stock: v.stock })) })));
+  }));
+
+  r.post("/orders", h(async (req, res) => {
+    const body = z
+      .object({
+        customerId: z.string().optional(),
+        name: z.string().min(2).max(80).optional(),
+        phone: z.string().max(16).optional(),
+        items: z.array(z.object({ sku: z.string(), size: z.string(), quantity: z.number().int().min(1).max(10) })).min(1).max(10),
+        addressLine1: z.string().min(5).max(200),
+        addressLine2: z.string().max(200).optional(),
+        landmark: z.string().max(120).optional(),
+        pincode: z.string().regex(/^\d{6}$/),
+        paymentMethod: z.enum(["COD", "PREPAID"]),
+      })
+      .parse(req.body);
+    let customer: { name: string; phone: string };
+    if (body.customerId) {
+      const c = await prisma.customer.findUnique({ where: { id: body.customerId } });
+      if (!c) throw notFound("Customer");
+      customer = { name: c.name, phone: c.phone };
+    } else {
+      const phone = body.phone ? normalizePhone(body.phone) : null;
+      if (!body.name || !phone) throw new AppError(400, "CUSTOMER_REQUIRED", "Pick a customer or enter a name and a valid 10-digit mobile number.");
+      customer = { name: body.name, phone };
+    }
+    // Validate price/stock/COD rules up front so the operator gets an immediate, clear error.
+    await quoteOrder({ items: body.items, pincode: body.pincode, paymentMethod: body.paymentMethod });
+    const orderNumber = await nextOrderNumber();
+    const payload = {
+      event_id: `evt_${randomUUID()}`,
+      type: "order.created",
+      order: {
+        order_number: orderNumber,
+        source: "dashboard",
+        customer,
+        payment_method: body.paymentMethod,
+        items: body.items,
+        address: { line1: body.addressLine1, line2: body.addressLine2, landmark: body.landmark, pincode: body.pincode },
+      },
+    };
+    const raw = JSON.stringify(payload);
+    const resp = await fetch(`${env.PUBLIC_API_URL}/webhooks/orders`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-wishluck-signature": `sha256=${signBody(raw, env.ORDER_WEBHOOK_SECRET)}` },
+      body: raw,
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (resp.status !== 202) throw new AppError(502, "WEBHOOK_FAILED", `Order webhook returned HTTP ${resp.status}`);
+    await audit(prisma, { actor: `human:${agentName(req)}`, entityType: "order", entityId: orderNumber, action: "ORDER_ENTERED_IN_DASHBOARD", meta: { eventId: payload.event_id } });
+    res.status(202).json({ orderNumber, eventId: payload.event_id });
   }));
 
   r.post("/orders/test", h(async (req, res) => {

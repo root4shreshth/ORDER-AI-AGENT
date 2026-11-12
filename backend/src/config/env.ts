@@ -21,6 +21,8 @@ const EnvSchema = z.object({
   ADMIN_API_KEY: z.string().optional().default(""),
   /** Optional Telegram channel (bot token from @BotFather). Empty = Telegram disabled. */
   TELEGRAM_BOT_TOKEN: z.string().optional().default(""),
+  /** Optional Telegram chat (e.g. a team group) that gets a message for every new order. Send /chatid to the bot to find it. */
+  TEAM_TELEGRAM_CHAT_ID: z.string().optional().default(""),
   /** Force the mock LLM even when a key is present (used by deterministic tests). */
   LLM_MODE: z.enum(["auto", "mock", "claude"]).default("auto"),
 });

@@ -54,3 +54,10 @@ describe("normalisers", () => {
     expect(addWorkingDays(new Date("2026-11-13T06:00:00Z"), 1).toISOString().slice(0, 10)).toBe("2026-11-16");
   });
 });
+
+describe("Telegram formatting", async () => {
+  const { toTelegramHtml } = await import("../../src/channels/telegram.js");
+  it("escapes HTML and converts **bold**", () => {
+    expect(toTelegramHtml("Total: **₹1,348** <script> & more")).toBe("Total: <b>₹1,348</b> &lt;script&gt; &amp; more");
+  });
+});
