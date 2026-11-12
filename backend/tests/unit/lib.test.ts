@@ -61,3 +61,16 @@ describe("Telegram formatting", async () => {
     expect(toTelegramHtml("Total: **₹1,348** <script> & more")).toBe("Total: <b>₹1,348</b> &lt;script&gt; &amp; more");
   });
 });
+
+describe("Telegram webhook secret", async () => {
+  const { telegramSecretToken } = await import("../../src/channels/telegram.js");
+  const { env } = await import("../../src/config/env.js");
+  it("keeps valid secrets and maps platform-generated ones (+/=) to a Telegram-safe token", () => {
+    const saved = env.TELEGRAM_WEBHOOK_SECRET;
+    env.TELEGRAM_WEBHOOK_SECRET = "abc_DEF-123";
+    expect(telegramSecretToken()).toBe("abc_DEF-123");
+    env.TELEGRAM_WEBHOOK_SECRET = "a+b/c==";
+    expect(telegramSecretToken()).toMatch(/^[0-9a-f]{64}$/);
+    env.TELEGRAM_WEBHOOK_SECRET = saved;
+  });
+});

@@ -14,7 +14,7 @@
  *
  * Runs inside the worker process (single instance), enabled when TELEGRAM_BOT_TOKEN is set.
  */
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import express, { Router } from "express";
 import type { Conversation, Prisma } from "@prisma/client";
 import { env } from "../config/env.js";
@@ -233,6 +233,16 @@ export async function dispatchToTelegram(messageId: string, transport: TelegramT
 }
 
 // ---------------------------------------------------------------- webhook endpoint (production)
+/**
+ * Telegram's secret_token allows only A–Z a–z 0–9 _ - (1–256 chars). Hosting platforms often generate
+ * secrets with + / = , so any other secret is mapped to its SHA-256 hex digest (same value on both sides).
+ */
+export function telegramSecretToken(): string {
+  const raw = env.TELEGRAM_WEBHOOK_SECRET;
+  if (!raw) return "";
+  return /^[A-Za-z0-9_-]{1,256}$/.test(raw) ? raw : createHash("sha256").update(raw).digest("hex");
+}
+
 let sharedApi: TelegramApi | undefined;
 const getApi = () => (sharedApi ??= new TelegramApi(env.TELEGRAM_BOT_TOKEN));
 
@@ -241,7 +251,7 @@ export function telegramWebhookRouter(): Router {
   const r = Router();
   r.post("/webhook", express.json({ limit: "1mb" }), (req, res) => {
     const secret = req.header("x-telegram-bot-api-secret-token") ?? "";
-    const expected = env.TELEGRAM_WEBHOOK_SECRET;
+    const expected = telegramSecretToken();
     const ok = !!expected && secret.length === expected.length && timingSafeEqual(Buffer.from(secret), Buffer.from(expected));
     if (!env.TELEGRAM_BOT_TOKEN || !ok) return void res.status(401).json({ error: "unauthorized" });
     res.json({ ok: true }); // ACK fast; Telegram retries on slow/failed responses (update_id dedupe covers it)
@@ -270,7 +280,7 @@ export function startTelegram(): () => Promise<void> {
         if (!env.TELEGRAM_WEBHOOK_SECRET) throw new Error("TELEGRAM_WEBHOOK_SECRET is required in webhook mode");
         await api.call("setWebhook", {
           url: `${env.PUBLIC_API_URL}/telegram/webhook`,
-          secret_token: env.TELEGRAM_WEBHOOK_SECRET,
+          secret_token: telegramSecretToken(),
           allowed_updates: ["message", "callback_query"],
         });
         logger.info(`Telegram channel active (webhook): @${me.username}`);
@@ -280,7 +290,7 @@ export function startTelegram(): () => Promise<void> {
       await api.call("deleteWebhook", { drop_pending_updates: false });
       logger.info(`Telegram channel active: @${me.username}`);
     } catch (err) {
-      logger.error({ err: String(err) }, "Telegram disabled — could not reach the Bot API (check TELEGRAM_BOT_TOKEN)");
+      logger.error({ err: String(err) }, "Telegram disabled — Bot API call failed (see err)");
       running = false;
       return;
     }
