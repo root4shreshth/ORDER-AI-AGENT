@@ -339,6 +339,8 @@ Each scenario runs through the **real HTTP API** (chat, signed webhooks, courier
 
 An automatic **grounding check** fails any reply that states an order number, AWB, ₹ amount or date that doesn't appear in that conversation's tool outputs (the only exceptions are policy constants such as ₹49 and ₹299).
 
+**Latest run on real Claude (`claude-haiku-5-5`): 41/42 passed, 12/12 Appendix B, 4/4 injection and data-leak cases, ~3.1 s per reply, ~$0.0015 per chat.** The one failure, and the history of what earlier runs found and how it was fixed, are explained in the report.
+
 Results go to [`docs/TEST_RESULTS.md`](docs/TEST_RESULTS.md):
 
 - understood, right tools, right decision;
