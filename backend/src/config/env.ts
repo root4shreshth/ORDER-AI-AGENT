@@ -7,6 +7,8 @@ const EnvSchema = z.object({
   REDIS_URL: z.string().default("redis://localhost:6385"),
   PORT: z.coerce.number().int().default(4000),
   PUBLIC_API_URL: z.string().default("http://localhost:4000"),
+  /** Customer-facing web app (chat widget, dummy payment page). */
+  WEB_URL: z.string().default("http://localhost:5173"),
   CORS_ORIGIN: z.string().default("http://localhost:5173"),
   LOG_LEVEL: z.string().default("info"),
   ANTHROPIC_API_KEY: z.string().optional().default(""),
