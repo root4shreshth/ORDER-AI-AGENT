@@ -18,4 +18,5 @@ COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/backend ./backend
 WORKDIR /app/backend
 EXPOSE 4000
-CMD ["node", "dist/src/server.js"]
+# migrations + seed-if-empty + API (see start.sh)
+CMD ["sh", "./start.sh"]

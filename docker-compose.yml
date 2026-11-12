@@ -48,7 +48,7 @@ services:
     environment:
       <<: *backend-env
       PORT: "4000"
-    command: ["sh", "-c", "npx prisma migrate deploy && node dist/prisma/seed.js --if-empty && node dist/src/server.js"]
+    command: ["sh", "./start.sh"]
     ports: ["4000:4000"]
     depends_on:
       postgres: { condition: service_healthy }

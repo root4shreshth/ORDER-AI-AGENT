@@ -10,7 +10,7 @@ services:
     region: singapore
     dockerfilePath: ./backend/Dockerfile
     dockerContext: .
-    dockerCommand: sh -c "npx prisma migrate deploy && node dist/prisma/seed.js --if-empty && node dist/src/server.js"
+    # start command comes from the image: backend/start.sh (migrate → seed if empty → API)
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
