@@ -37,6 +37,13 @@ const windowEnds = (deliveredAt: Date | null) => (deliveredAt ? fmtDate(addDays(
 
 const OrderNo = z.string().min(3).max(20).describe("Order number in the form WL followed by digits");
 
+/** Phone proven by the channel itself: a Telegram chat linked through the share-own-contact button. */
+export async function channelVerifiedPhone(conv: { channel: string; externalChatId: string | null }): Promise<string | null> {
+  if (conv.channel !== "telegram" || !conv.externalChatId) return null;
+  const c = await prisma.customer.findUnique({ where: { telegramChatId: conv.externalChatId } });
+  return c?.phone ?? null;
+}
+
 /** Authorization gate for every order-specific tool. */
 export function requireVerified(ctx: ToolContext, orderInput: string): { orderNumber: string } | ToolResult {
   const orderNumber = normalizeOrderNumber(orderInput);
@@ -64,8 +71,8 @@ export const TOOLS = [
   define({
     name: "verify_customer",
     description:
-      "Verify the customer for ONE order using the order number and the phone number used on that order. Required before ANY order-specific information is shared or any order action is taken. Never guess or reuse numbers from other messages that the customer didn't give for this purpose.",
-    schema: z.object({ order_number: OrderNo, phone: z.string().min(6).max(20).describe("10-digit mobile number given by the customer") }),
+      "Verify the customer for ONE order using the order number and the phone number used on that order. Required before ANY order-specific information is shared or any order action is taken. Never guess or reuse numbers from other messages that the customer didn't give for this purpose. If <context> shows channel_verified_phone, the phone may be omitted — the backend uses the phone the channel already verified.",
+    schema: z.object({ order_number: OrderNo, phone: z.string().min(6).max(20).optional().describe("10-digit mobile number given by the customer; omit only when <context> shows channel_verified_phone") }),
     handler: async (ctx, input) => {
       const s = await getSettings();
       const conv = ctx.conversation;
@@ -73,7 +80,18 @@ export const TOOLS = [
         return { ok: false, code: "VERIFICATION_LOCKED", message: "Too many failed verification attempts. Hand the chat over to a human (reason VERIFICATION_FAILED)." };
       }
       const orderNumber = normalizeOrderNumber(input.order_number);
-      const res = orderNumber ? await verifyOrderPhone(orderNumber, input.phone) : { ok: false };
+      // Telegram-verified identity: the customer shared their OWN number through Telegram.
+      const channelPhone = await channelVerifiedPhone(conv);
+      if (!input.phone && !channelPhone) {
+        return { ok: false, code: "PHONE_REQUIRED", message: "Ask the customer for the phone number used on this order." };
+      }
+      let res: { ok: boolean; customerId?: string } = { ok: false };
+      let via = "typed_phone";
+      if (orderNumber && input.phone) res = await verifyOrderPhone(orderNumber, input.phone);
+      if (orderNumber && !res.ok && channelPhone) {
+        res = await verifyOrderPhone(orderNumber, channelPhone);
+        via = "telegram_verified_phone";
+      }
       if (!res.ok || !orderNumber) {
         const updated = await prisma.conversation.update({ where: { id: conv.id }, data: { failedVerifyCount: { increment: 1 } } });
         ctx.conversation = updated;
@@ -93,7 +111,7 @@ export const TOOLS = [
         where: { id: conv.id },
         data: { verifiedOrderNumbers: verified, customerId: res.customerId, verifiedAt: new Date(), failedVerifyCount: 0, context: { ...(conv.context as object), orderNumber } },
       });
-      return { ok: true, code: "VERIFIED", message: `Customer verified for order ${orderNumber}.`, data: { order_number: orderNumber } };
+      return { ok: true, code: "VERIFIED", message: `Customer verified for order ${orderNumber}.`, data: { order_number: orderNumber, verified_via: via } };
     },
   }),
 

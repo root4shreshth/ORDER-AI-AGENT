@@ -10,6 +10,7 @@ import { closeQueue, jobsQueue } from "../../src/jobs/queues.js";
 import { processJob } from "../../src/jobs/processor.js";
 import { dispatchToTelegram, handleTelegramUpdate, type TelegramTransport, type TgUpdate } from "../../src/channels/telegram.js";
 import { handleCustomerMessage } from "../../src/agent/orchestrator.js";
+import { executeTool } from "../../src/agent/tools/execute.js";
 import { resetDb, startServer, stopServer } from "./helpers.js";
 
 const sent: { chatId: string; text: string; markup?: unknown }[] = [];
@@ -92,6 +93,36 @@ describe("Telegram channel", () => {
 
     await handleTelegramUpdate({ update_id: ++updateId, callback_query: { id: "cb1", from: { id: CHAT }, data: "qr:CONFIRM:WL10249", message: { chat: { id: CHAT } } } }, fake);
     expect((await prisma.order.findUniqueOrThrow({ where: { orderNumber: "WL10249" } })).status).toBe("CONFIRMED");
+  });
+
+  it("Telegram-verified phone: own order verifies with order number only; another customer's order still fails", async () => {
+    // Shares Aarav's number as their OWN contact → chat linked to Aarav
+    await handleTelegramUpdate(msg({ contact: { phone_number: "9876543210", user_id: CHAT } }), fake);
+    const conv = await prisma.conversation.findFirstOrThrow({ where: { channel: "telegram", externalChatId: String(CHAT) } });
+    const ctx = async () => ({ conversationId: conv.id, turnId: `t-${Math.random()}`, conversation: await prisma.conversation.findUniqueOrThrow({ where: { id: conv.id } }), customerText: "x", language: "en" as const, trace: [], systemFailures: 0 });
+
+    const own = await executeTool(await ctx(), "verify_customer", { order_number: "WL10234" });
+    expect(own).toMatchObject({ ok: true, code: "VERIFIED", data: { verified_via: "telegram_verified_phone" } });
+
+    const other = await executeTool(await ctx(), "verify_customer", { order_number: "WL10256" }); // Lakshmi's order
+    expect(other).toMatchObject({ ok: false, code: "VERIFICATION_FAILED" });
+    expect((await prisma.conversation.findUniqueOrThrow({ where: { id: conv.id } })).verifiedOrderNumbers).toEqual(["WL10234"]);
+  });
+
+  it("unlinked chats still need the phone", async () => {
+    await handleTelegramUpdate(msg({ text: "hi" }), fake);
+    const conv = await prisma.conversation.findFirstOrThrow({ where: { channel: "telegram" } });
+    const out = await executeTool(
+      { conversationId: conv.id, turnId: "t1", conversation: conv, customerText: "x", language: "en", trace: [], systemFailures: 0 },
+      "verify_customer",
+      { order_number: "WL10234" },
+    );
+    expect(out.code).toBe("PHONE_REQUIRED");
+  });
+
+  it("sharing an unknown number creates a linked customer profile", async () => {
+    await handleTelegramUpdate(msg({ contact: { phone_number: "+91 9000012345", user_id: CHAT, first_name: "Test" } }), fake);
+    expect((await prisma.customer.findUniqueOrThrow({ where: { phone: "9000012345" } })).telegramChatId).toBe(String(CHAT));
   });
 
   it("voice notes get an honest 'not supported' reply, no agent call", async () => {

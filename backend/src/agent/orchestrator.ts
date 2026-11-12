@@ -18,6 +18,8 @@ import { audit } from "../modules/audit/audit.js";
 import { publish } from "../lib/events.js";
 import { detectEscalation, detectInjection, detectLanguage, detectOtherCustomerProbe, type Lang } from "./safety.js";
 import { renderContext } from "./prompts.js";
+import { channelVerifiedPhone } from "./tools/registry.js";
+import { maskPhone } from "../lib/mask.js";
 import type { ToolContext } from "./tools/context.js";
 import type { Engine, EngineResult, HistoryMessage } from "./llm/types.js";
 import { ClaudeEngine } from "./llm/claude.js";
@@ -182,6 +184,7 @@ export async function handleCustomerMessage(conversationId: string, rawText: str
       verifiedOrders: conv.verifiedOrderNumbers,
       activeFlow: await describeFlow(conv),
       pendingAction: pending ? { id: pending.id, summary: pending.summary } : null,
+      channelVerifiedPhone: await channelVerifiedPhone(conv).then((p) => (p ? maskPhone(p) : null)),
       earlierTools: (await prisma.toolCall.findMany({ where: { conversationId }, orderBy: { createdAt: "desc" }, take: 10 }))
         .reverse()
         .map((t) => {

@@ -394,7 +394,8 @@ Admin endpoints require `x-admin-key` (`ADMIN_API_KEY`).
 **How it works:**
 - **Same agent.** Messages run through the same orchestrator, so verification, policy, confirmations, guards and handover are identical. Telegram chats appear in the same inbox with a *Telegram* badge, and a human can take over and reply from the dashboard; the reply is delivered to Telegram.
 - **Buttons.** COD and failed-delivery options become inline buttons.
-- **Linking a customer.** `/start` offers a "📱 Share my phone number" button. Telegram only shares the sender's *own* number (forwarded contacts are rejected), so the chat is linked to that customer. From then on, COD confirmations and delivery follow-ups for their orders arrive in Telegram. Linking does **not** reveal order data: order details still need the order number + phone verification.
+- **Linking a customer.** `/start` offers a "📱 Share my phone number" button. Telegram only shares the sender's *own* number (forwarded contacts are rejected), so the chat is linked to that customer. From then on, COD confirmations and delivery follow-ups for their orders arrive in Telegram. Linking does **not** reveal order data by itself.
+- **Telegram-verified identity.** Once linked, the customer gives just the **order number** for orders placed with that number; the backend uses the phone Telegram verified, which is as strong as an OTP. Orders on any other number still fail with the usual "share nothing" reply, and unlinked chats still need order number + phone.
 - **Reliability.** Updates are de-duplicated by `update_id` and every outbound message is sent exactly once (Redis claim per message id).
 - **Commands.** `/new` starts a fresh conversation.
 
