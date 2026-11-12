@@ -78,7 +78,9 @@ export function CustomerChatPage() {
     };
   }, [session?.conversationId, session?.token, load]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }), [session?.messages.length, pending]);
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [session?.messages.length, pending]);
 
   async function send(msg: string) {
     if (!session || !msg.trim() || sending) return;

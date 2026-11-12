@@ -86,8 +86,12 @@ export function ConversationView({ id }: { id: string }) {
   const [draft, setDraft] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => endRef.current?.scrollIntoView({ block: "end" }), [q.data?.messages.length]);
-  useEffect(() => setDraft(""), [id]);
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: "end" });
+  }, [q.data?.messages.length]);
+  useEffect(() => {
+    setDraft("");
+  }, [id]);
 
   const callsByMessage = useMemo(() => {
     const map = new Map<string, ToolCall[]>();
